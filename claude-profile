@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="0.2.0"
+VERSION="0.3.0"
 set -euo pipefail
 
 DEFAULT_CONFIG="$HOME/.claude"
@@ -26,23 +26,29 @@ usage() {
 Claude Profile Manager
 
 Usage:
-  claude-profile --create <name>
-  claude-profile --delete <name>
-  claude-profile --list
-  claude-profile --use [name]
+  claude-profile [global options] [command] [arguments]
   claude-profile --profile <name> [-- <claude args>]
-  claude-profile -P <name> [-- <claude args>]
-  claude-profile --path <name>
-  claude-profile --repair <name>
-  claude-profile --repair --all
-  claude-profile --version | -V
-  claude-profile [command] --skip-version-check
-  claude-profile --help
 
-Default:
+No arguments:
+  Launch Claude Code with the active profile, or default if none is selected.
+
+Commands:
+  -c, --create <name>          Create a custom profile.
+  -d, --delete <name>          Delete a custom profile after confirmation.
+  -l, --list                   List profiles. Mark the active profile with *.
+  -u, --use [name]             Save the active profile and exit. Omit name to choose.
+  -P, --profile <name>         Launch one session without changing the active profile.
+  -p, --path <name>            Print a profile's configuration directory.
+  -r, --repair <name>          Repair shared links for one custom profile.
+  -a, --all                    With --repair or -r, repair every custom profile.
+  -V, --version                Print the installed version and releases URL.
+  -h, --help                   Show this help.
+
+Global options:
+  -S, --skip-version-check     Skip the update check for this invocation.
+
+Profiles:
   default -> $DEFAULT_CONFIG
-
-Custom profiles:
   $PROFILES_ROOT/<name>
 EOF
 }
@@ -62,7 +68,8 @@ parse_global_args() {
     if [[ "$after_boundary" -eq 0 && "$arg" == "--" ]]; then
       after_boundary=1
       PARSED_ARGS+=("$arg")
-    elif [[ "$after_boundary" -eq 0 && "$arg" == "--skip-version-check" ]]; then
+    elif [[ "$after_boundary" -eq 0 && \
+            ( "$arg" == "--skip-version-check" || "$arg" == "-S" ) ]]; then
       SKIP_VERSION_CHECK=1
     else
       PARSED_ARGS+=("$arg")
@@ -366,15 +373,27 @@ delete_profile() {
 }
 
 list_profiles() {
-  printf "%-20s %-10s %s\n" "PROFILE" "TYPE" "CONFIG DIRECTORY"
-  printf "%-20s %-10s %s\n" "-------" "----" "----------------"
-  printf "%-20s %-10s %s\n" "default" "default" "$DEFAULT_CONFIG"
+  local active marker
+  active="$(active_profile)"
+  marker=""
+  [[ "$active" != "default" ]] || marker="*"
+
+  printf "%-6s %-20s %-10s %s\n" \
+    "ACTIVE" "PROFILE" "TYPE" "CONFIG DIRECTORY"
+  printf "%-6s %-20s %-10s %s\n" \
+    "------" "-------" "----" "----------------"
+  printf "%-6s %-20s %-10s %s\n" \
+    "$marker" "default" "default" "$DEFAULT_CONFIG"
 
   local dir
   while IFS= read -r dir; do
     [[ -n "$dir" ]] || continue
-    printf "%-20s %-10s %s\n" \
-      "$(basename "$dir")" "custom" "$dir"
+    local name
+    name="$(basename "$dir")"
+    marker=""
+    [[ "$active" != "$name" ]] || marker="*"
+    printf "%-6s %-20s %-10s %s\n" \
+      "$marker" "$name" "custom" "$dir"
   done < <(list_custom_profile_dirs)
 }
 
@@ -526,21 +545,21 @@ main() {
   fi
 
   case "${1:-}" in
-  --create)
+  --create|-c)
     create_profile "${2:-}"
     ;;
-  --delete)
+  --delete|-d)
     delete_profile "${2:-}"
     ;;
-  --list)
+  --list|-l)
     list_profiles
     ;;
-  --path)
+  --path|-p)
     show_path "${2:-}"
     ;;
-  --repair)
+  --repair|-r)
     case "${2:-}" in
-      --all)
+      --all|-a)
         repair_all_profiles
         ;;
       "")
@@ -551,7 +570,7 @@ main() {
         ;;
     esac
     ;;
-  --use)
+  --use|-u)
     select_active_profile "${2:-}"
     ;;
   --profile|-P)

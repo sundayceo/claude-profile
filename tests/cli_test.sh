@@ -67,6 +67,16 @@ assert_file_missing() {
   fi
 }
 
+assert_dir_exists() {
+  local path="$1"
+  local message="$2"
+
+  if [[ ! -d "$path" ]]; then
+    printf 'FAIL: %s\nmissing directory: %s\n' "$message" "$path" >&2
+    failures=$((failures + 1))
+  fi
+}
+
 assert_status() {
   local expected="$1"
   local actual="$2"
@@ -102,7 +112,7 @@ run_interactive() {
       "$input" "$CLI" "$@" 2>&1
 }
 
-expected_version='claude-profile 0.2.0
+expected_version='claude-profile 0.3.0
 Releases: https://github.com/sundayceo/claude-profile/releases'
 
 home="$TEST_ROOT/version-home"
@@ -115,7 +125,24 @@ output="$(HOME="$home" "$CLI" -V 2>&1 || true)"
 assert_eq "$expected_version" "$output" '-V prints version and releases URL'
 
 output="$(HOME="$home" "$CLI" --help 2>&1 || true)"
-assert_contains "$output" 'claude-profile --version | -V' '--help documents version flags'
+assert_contains "$output" 'No arguments:' '--help has a no-arguments section'
+assert_contains "$output" 'Launch Claude Code with the active profile' \
+  '--help explains bare invocation'
+assert_contains "$output" 'Commands:' '--help has a commands section'
+assert_contains "$output" 'Global options:' '--help has a global-options section'
+assert_contains "$output" '-c, --create <name>' '--help describes create aliases'
+assert_contains "$output" '-d, --delete <name>' '--help describes delete aliases'
+assert_contains "$output" '-l, --list' '--help describes list aliases'
+assert_contains "$output" '-u, --use [name]' '--help describes use aliases'
+assert_contains "$output" '-P, --profile <name>' '--help describes profile aliases'
+assert_contains "$output" '-p, --path <name>' '--help describes path aliases'
+assert_contains "$output" '-r, --repair <name>' '--help describes repair aliases'
+assert_contains "$output" '-a, --all' '--help describes repair-all aliases'
+assert_contains "$output" '-V, --version' '--help describes version aliases'
+assert_contains "$output" '-h, --help' '--help describes help aliases'
+assert_contains "$output" '-S, --skip-version-check' '--help describes skip aliases'
+assert_contains "$output" 'Create a custom profile.' '--help explains create'
+assert_contains "$output" 'Mark the active profile with *.' '--help explains list output'
 
 fake_bin="$ROOT_DIR/tests/fixtures/bin"
 chmod +x "$fake_bin/claude" "$fake_bin/curl" \
@@ -186,7 +213,7 @@ curl_log="$TEST_ROOT/curl.log"
 : > "$curl_log"
 output="$(PATH="$fake_bin:$PATH" CURL_TEST_LOG="$curl_log" CURL_TEST_MODE=latest \
   bash -c 'source "$1"; latest_version' _ "$CLI" 2>/dev/null || true)"
-assert_eq '0.3.0' "$output" 'latest_version extracts the redirected release tag'
+assert_eq '0.4.0' "$output" 'latest_version extracts the redirected release tag'
 
 output="$(PATH="$fake_bin:$PATH" CURL_TEST_MODE=offline \
   bash -c 'source "$1"; latest_version' _ "$CLI" 2>/dev/null || true)"
@@ -225,7 +252,7 @@ interactive_cache="$TEST_ROOT/interactive-cache"
 output="$(run_interactive o "$interactive_home" "$interactive_cache" latest --version)"
 interactive_status=$?
 assert_status 0 "$interactive_status" 'o continues with a successful original command'
-assert_contains "$output" 'claude-profile 0.2.0 → 0.3.0 available' \
+assert_contains "$output" 'claude-profile 0.3.0 → 0.4.0 available' \
   'interactive invocation announces a newer version'
 assert_contains "$output" '[o] Open release page' 'update prompt offers the release page'
 assert_contains "$output" '[u] Update now' 'update prompt offers installation'
@@ -253,7 +280,7 @@ fi
 : > "$curl_log"
 output="$(run_interactive '' "$interactive_home" "$interactive_cache" latest --version || true)"
 assert_file_eq '' "$curl_log" 'a snoozed invocation performs no release request'
-assert_contains "$output" 'claude-profile 0.2.0' 'a snoozed invocation continues'
+assert_contains "$output" 'claude-profile 0.3.0' 'a snoozed invocation continues'
 
 update_home="$TEST_ROOT/update-home"
 update_cache="$TEST_ROOT/update-cache"
@@ -282,13 +309,13 @@ skip_cache="$TEST_ROOT/skip-cache"
 output="$(run_interactive '' "$skip_home" "$skip_cache" latest \
   --version --skip-version-check || true)"
 assert_file_eq '' "$curl_log" '--skip-version-check prevents release requests'
-assert_contains "$output" 'claude-profile 0.2.0' \
+assert_contains "$output" 'claude-profile 0.3.0' \
   '--skip-version-check continues the original command'
 
 offline_home="$TEST_ROOT/offline-home"
 offline_cache="$TEST_ROOT/offline-cache"
 output="$(run_interactive '' "$offline_home" "$offline_cache" offline --version || true)"
-assert_contains "$output" 'claude-profile 0.2.0' 'offline update checks do not block commands'
+assert_contains "$output" 'claude-profile 0.3.0' 'offline update checks do not block commands'
 assert_not_contains "$output" 'simulated network failure' \
   'offline update checks fail silently'
 
@@ -343,6 +370,75 @@ HOME="$boundary_home" PATH="$fake_bin:$PATH" CLAUDE_TEST_LOG="$boundary_log" \
 assert_file_eq "config=$boundary_home/.claude-custom-profiles/work
 args=<--skip-version-check>" "$boundary_log" \
   'arguments after -- are forwarded without global parsing'
+
+alias_home="$TEST_ROOT/alias-home"
+alias_log="$TEST_ROOT/alias-claude.log"
+mkdir -p "$alias_home/.claude"
+
+HOME="$alias_home" PATH="$fake_bin:$PATH" CLAUDE_TEST_LOG="$alias_log" \
+  "$CLI" -c work >/dev/null 2>&1 || true
+assert_dir_exists "$alias_home/.claude-custom-profiles/work" \
+  '-c creates a custom profile'
+
+output="$(HOME="$alias_home" "$CLI" --list 2>&1 || true)"
+assert_contains "$output" 'ACTIVE' '--list labels the active marker column'
+assert_contains "$output" $'*      default' \
+  '--list marks default active before a profile is selected'
+assert_not_contains "$output" $'*      work' \
+  '--list leaves inactive custom profiles unmarked'
+
+HOME="$alias_home" PATH="$fake_bin:$PATH" CLAUDE_TEST_LOG="$alias_log" \
+  "$CLI" -u work >/dev/null 2>&1 || true
+assert_file_eq 'work' "$alias_home/.claude-custom-profiles/.active-profile" \
+  '-u saves the active profile'
+
+output="$(HOME="$alias_home" "$CLI" -l 2>&1 || true)"
+assert_contains "$output" 'work' '-l lists profiles'
+assert_contains "$output" $'*      work' '-l marks the saved custom profile active'
+assert_not_contains "$output" $'*      default' '-l removes the marker from default'
+
+output="$(HOME="$alias_home" "$CLI" -p work 2>&1 || true)"
+assert_eq "$alias_home/.claude-custom-profiles/work" "$output" \
+  '-p prints the profile path'
+
+: > "$alias_log"
+HOME="$alias_home" PATH="$fake_bin:$PATH" CLAUDE_TEST_LOG="$alias_log" \
+  "$CLI" -P work -- --model opus >/dev/null 2>&1 || true
+assert_file_eq "config=$alias_home/.claude-custom-profiles/work
+args=<--model><opus>" "$alias_log" '-P launches a one-off profile'
+
+output="$(HOME="$alias_home" "$CLI" -r work 2>&1 || true)"
+assert_contains "$output" 'Repairing:' '-r repairs one profile'
+
+output="$(HOME="$alias_home" "$CLI" -r -a 2>&1 || true)"
+assert_contains "$output" 'Repairing:' '-r -a repairs all custom profiles'
+
+output="$(HOME="$alias_home" "$CLI" -V 2>&1 || true)"
+assert_eq "$expected_version" "$output" '-V shows the version'
+
+output="$(HOME="$alias_home" "$CLI" -h 2>&1 || true)"
+assert_contains "$output" 'Commands:' '-h shows descriptive help'
+
+output="$(bash -c '
+  source "$1"
+  parse_global_args -u work -S
+  printf "%s|" "$SKIP_VERSION_CHECK"
+  printf "<%s>" "${PARSED_ARGS[@]}"
+' _ "$CLI" 2>/dev/null || true)"
+assert_eq '1|<-u><work>' "$output" '-S is removed before the argument boundary'
+
+output="$(bash -c '
+  source "$1"
+  parse_global_args -P work -- -S
+  printf "%s|" "$SKIP_VERSION_CHECK"
+  printf "<%s>" "${PARSED_ARGS[@]}"
+' _ "$CLI" 2>/dev/null || true)"
+assert_eq '0|<-P><work><--><-S>' "$output" '-S is preserved after the argument boundary'
+
+printf 'y\n' | HOME="$alias_home" PATH="$fake_bin:$PATH" \
+  CLAUDE_TEST_LOG="$alias_log" "$CLI" -d work >/dev/null 2>&1 || true
+assert_file_missing "$alias_home/.claude-custom-profiles/work" \
+  '-d deletes a custom profile'
 
 if (( failures > 0 )); then
   printf '\n%d test(s) failed\n' "$failures" >&2

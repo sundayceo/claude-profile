@@ -59,6 +59,32 @@ Repair shared configuration symlinks:
 claude-profile --repair --all
 ```
 
+## Command Reference
+
+Running `claude-profile` without arguments launches Claude Code with the active
+profile. If no profile has been selected, it uses `default`.
+
+| Short | Long | Description |
+|---|---|---|
+| `-c` | `--create <name>` | Create a custom profile. |
+| `-d` | `--delete <name>` | Delete a custom profile after confirmation. |
+| `-l` | `--list` | List profiles; `*` marks the active profile. |
+| `-u` | `--use [name]` | Save the active profile and exit. |
+| `-P` | `--profile <name>` | Launch one session without changing the active profile. |
+| `-p` | `--path <name>` | Print a profile's configuration directory. |
+| `-r` | `--repair <name>` | Repair shared links for one custom profile. |
+| `-a` | `--all` | Use with repair to repair every custom profile. |
+| `-V` | `--version` | Print the installed version and releases URL. |
+| `-h` | `--help` | Show command help. |
+| `-S` | `--skip-version-check` | Skip the update check for one invocation. |
+
+Use repair-all with either long or short forms:
+
+```bash
+claude-profile --repair --all
+claude-profile -r -a
+```
+
 ## Version and Updates
 
 Show the installed version and the GitHub releases page:
