@@ -59,6 +59,12 @@ Repair shared configuration symlinks:
 claude-profile --repair --all
 ```
 
+Profiles share `settings.json`, `keybindings.json`, `skills`, `agents`, and
+`commands` with the default profile. When repair finds an existing
+profile-specific file or directory at one of these paths, it preserves that
+item with a `.claude-profile-backup` suffix before creating the shared link. A
+numeric suffix is added if that backup name already exists.
+
 ## Command Reference
 
 Running `claude-profile` without arguments launches Claude Code with the active

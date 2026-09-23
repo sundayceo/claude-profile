@@ -87,6 +87,20 @@ assert_file_missing() {
   fi
 }
 
+assert_symlink_to() {
+  local expected="$1"
+  local path="$2"
+  local message="$3"
+
+  if [[ ! -L "$path" ]]; then
+    printf 'FAIL: %s\nnot a symlink: %s\n' "$message" "$path" >&2
+    failures=$((failures + 1))
+    return
+  fi
+
+  assert_eq "$expected" "$(readlink "$path")" "$message"
+}
+
 assert_dir_exists() {
   local path="$1"
   local message="$2"
@@ -435,6 +449,51 @@ assert_contains "$output" 'Repairing:' '-r repairs one profile'
 
 output="$(HOME="$alias_home" "$CLI" -r -a 2>&1 || true)"
 assert_contains "$output" 'Repairing:' '-r -a repairs all custom profiles'
+
+repair_home="$TEST_ROOT/repair-home"
+mkdir -p "$repair_home/.claude/skills" \
+  "$repair_home/.claude/agents" \
+  "$repair_home/.claude/commands" \
+  "$repair_home/.claude-custom-profiles/work/skills"
+printf '%s\n' '{"theme":"dark"}' > "$repair_home/.claude/settings.json"
+printf '%s\n' '{"theme":"light"}' > \
+  "$repair_home/.claude-custom-profiles/work/settings.json"
+printf '%s\n' '[{"key":"ctrl+k"}]' > "$repair_home/.claude/keybindings.json"
+printf '%s\n' '[{"key":"ctrl+j"}]' > \
+  "$repair_home/.claude-custom-profiles/work/keybindings.json"
+printf '%s\n' 'default skill' > "$repair_home/.claude/skills/default.md"
+printf '%s\n' 'profile skill' > \
+  "$repair_home/.claude-custom-profiles/work/skills/profile.md"
+
+output="$(HOME="$repair_home" "$CLI" --repair --all 2>&1 || true)"
+assert_symlink_to "$repair_home/.claude/settings.json" \
+  "$repair_home/.claude-custom-profiles/work/settings.json" \
+  '--repair --all syncs settings.json with the default profile'
+assert_file_eq '{"theme":"light"}' \
+  "$repair_home/.claude-custom-profiles/work/settings.json.claude-profile-backup" \
+  '--repair --all backs up existing profile settings before syncing'
+assert_contains "$output" 'backed up settings.json' \
+  '--repair --all reports the settings backup'
+assert_symlink_to "$repair_home/.claude/keybindings.json" \
+  "$repair_home/.claude-custom-profiles/work/keybindings.json" \
+  '--repair --all syncs keybindings.json with the default profile'
+assert_file_eq '[{"key":"ctrl+j"}]' \
+  "$repair_home/.claude-custom-profiles/work/keybindings.json.claude-profile-backup" \
+  '--repair --all backs up existing profile keybindings before syncing'
+assert_contains "$output" 'backed up keybindings.json' \
+  '--repair --all reports the keybindings backup'
+assert_symlink_to "$repair_home/.claude/skills" \
+  "$repair_home/.claude-custom-profiles/work/skills" \
+  '--repair --all syncs skills with the default profile'
+assert_file_eq 'profile skill' \
+  "$repair_home/.claude-custom-profiles/work/skills.claude-profile-backup/profile.md" \
+  '--repair --all backs up existing profile skills before syncing'
+assert_symlink_to "$repair_home/.claude/agents" \
+  "$repair_home/.claude-custom-profiles/work/agents" \
+  '--repair --all syncs agents with the default profile'
+assert_symlink_to "$repair_home/.claude/commands" \
+  "$repair_home/.claude-custom-profiles/work/commands" \
+  '--repair --all syncs commands with the default profile'
 
 output="$(HOME="$alias_home" "$CLI" -V 2>&1 || true)"
 assert_eq "$expected_version" "$output" '-V shows the version'

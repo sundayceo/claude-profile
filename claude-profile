@@ -9,6 +9,8 @@ RELEASES_URL="https://github.com/sundayceo/claude-profile/releases"
 INSTALL_URL="https://raw.githubusercontent.com/sundayceo/claude-profile/main/install.sh"
 
 SHARED_ITEMS=(
+  settings.json
+  keybindings.json
   skills
   agents
   commands
@@ -482,7 +484,7 @@ repair_profile() {
   echo "  Path: $target"
   echo
 
-  local item source dest current
+  local item source dest current backup suffix
 
   for item in "${SHARED_ITEMS[@]}"; do
     source="$DEFAULT_CONFIG/$item"
@@ -508,7 +510,16 @@ repair_profile() {
     fi
 
     if [[ -e "$dest" ]]; then
-      printf "  skip    %s (existing non-symlink left untouched)\n" "$item"
+      backup="$dest.claude-profile-backup"
+      suffix=0
+      while [[ -e "$backup" || -L "$backup" ]]; do
+        suffix=$((suffix + 1))
+        backup="$dest.claude-profile-backup.$suffix"
+      done
+      mv "$dest" "$backup"
+      ln -s "$source" "$dest"
+      printf "  backed up %s -> %s\n" "$item" "$backup"
+      printf "  repaired  %s -> %s\n" "$item" "$source"
       continue
     fi
 
