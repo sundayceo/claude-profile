@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+{
+  printf 'config=%s\n' "${CLAUDE_CONFIG_DIR-<unset>}"
+  printf 'args='
+  for arg in "$@"; do
+    printf '<%s>' "$arg"
+  done
+  printf '\n'
+} >> "$CLAUDE_TEST_LOG"

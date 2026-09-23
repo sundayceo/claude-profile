@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+
+if [[ -n "${CURL_TEST_LOG:-}" ]]; then
+  printf 'curl' >> "$CURL_TEST_LOG"
+  for arg in "$@"; do
+    printf ' <%s>' "$arg" >> "$CURL_TEST_LOG"
+  done
+  printf '\n' >> "$CURL_TEST_LOG"
+fi
+
+for arg in "$@"; do
+  if [[ "$arg" == "https://raw.githubusercontent.com/sundayceo/claude-profile/main/install.sh" ]]; then
+    output_path=''
+    previous=''
+    for installer_arg in "$@"; do
+      if [[ "$previous" == "-o" ]]; then
+        output_path="$installer_arg"
+        break
+      fi
+      previous="$installer_arg"
+    done
+    [[ -n "$output_path" ]] || exit 65
+    printf '#!/usr/bin/env bash\nprintf installed > "$INSTALL_TEST_LOG"\n' > "$output_path"
+    exit 0
+  fi
+done
+
+case "${CURL_TEST_MODE:-latest}" in
+  latest)
+    printf '%s' 'https://github.com/sundayceo/claude-profile/releases/tag/v0.3.0'
+    ;;
+  current)
+    printf '%s' 'https://github.com/sundayceo/claude-profile/releases/tag/v0.2.0'
+    ;;
+  malformed)
+    printf '%s' 'https://github.com/sundayceo/claude-profile/releases/tag/latest'
+    ;;
+  offline)
+    echo 'simulated network failure' >&2
+    exit 22
+    ;;
+  *)
+    exit 64
+    ;;
+esac

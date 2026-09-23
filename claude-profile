@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-VERSION="0.1.0"
+VERSION="0.2.0"
 set -euo pipefail
 
 DEFAULT_CONFIG="$HOME/.claude"
 PROFILES_ROOT="$HOME/.claude-custom-profiles"
+ACTIVE_PROFILE_FILE="$PROFILES_ROOT/.active-profile"
+RELEASES_URL="https://github.com/sundayceo/claude-profile/releases"
+INSTALL_URL="https://raw.githubusercontent.com/sundayceo/claude-profile/main/install.sh"
 
 SHARED_ITEMS=(
   skills
@@ -26,10 +29,14 @@ Usage:
   claude-profile --create <name>
   claude-profile --delete <name>
   claude-profile --list
-  claude-profile --use [name] [-- <claude args>]
+  claude-profile --use [name]
+  claude-profile --profile <name> [-- <claude args>]
+  claude-profile -P <name> [-- <claude args>]
   claude-profile --path <name>
   claude-profile --repair <name>
   claude-profile --repair --all
+  claude-profile --version | -V
+  claude-profile [command] --skip-version-check
   claude-profile --help
 
 Default:
@@ -38,6 +45,165 @@ Default:
 Custom profiles:
   $PROFILES_ROOT/<name>
 EOF
+}
+
+show_version() {
+  printf 'claude-profile %s\n' "$VERSION"
+  printf 'Releases: %s\n' "$RELEASES_URL"
+}
+
+parse_global_args() {
+  SKIP_VERSION_CHECK=0
+  PARSED_ARGS=()
+
+  local after_boundary=0
+  local arg
+  for arg in "$@"; do
+    if [[ "$after_boundary" -eq 0 && "$arg" == "--" ]]; then
+      after_boundary=1
+      PARSED_ARGS+=("$arg")
+    elif [[ "$after_boundary" -eq 0 && "$arg" == "--skip-version-check" ]]; then
+      SKIP_VERSION_CHECK=1
+    else
+      PARSED_ARGS+=("$arg")
+    fi
+  done
+}
+
+is_newer_version() {
+  local candidate="$1"
+  local installed="$2"
+
+  [[ "$candidate" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  [[ "$installed" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+
+  local candidate_major candidate_minor candidate_patch
+  local installed_major installed_minor installed_patch
+  IFS=. read -r candidate_major candidate_minor candidate_patch <<< "$candidate"
+  IFS=. read -r installed_major installed_minor installed_patch <<< "$installed"
+
+  if (( 10#$candidate_major != 10#$installed_major )); then
+    (( 10#$candidate_major > 10#$installed_major ))
+  elif (( 10#$candidate_minor != 10#$installed_minor )); then
+    (( 10#$candidate_minor > 10#$installed_minor ))
+  else
+    (( 10#$candidate_patch > 10#$installed_patch ))
+  fi
+}
+
+latest_version() {
+  command -v curl >/dev/null 2>&1 || return 1
+
+  local url version
+  url="$(
+    curl -fsSIL \
+      --connect-timeout 1 \
+      --max-time 2 \
+      -o /dev/null \
+      -w '%{url_effective}' \
+      "$RELEASES_URL/latest" 2>/dev/null
+  )" || return 1
+
+  version="${url##*/}"
+  version="${version#v}"
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  printf '%s\n' "$version"
+}
+
+should_check_for_update() {
+  [[ "${SKIP_VERSION_CHECK:-0}" -eq 0 && -t 0 && -t 2 ]]
+}
+
+snooze_file() {
+  printf '%s/claude-profile/version-check-snooze-until\n' \
+    "${XDG_CACHE_HOME:-$HOME/.cache}"
+}
+
+is_snoozed() {
+  local path deadline now
+  path="$(snooze_file)"
+  [[ -f "$path" ]] || return 1
+  IFS= read -r deadline < "$path" || return 1
+  [[ "$deadline" =~ ^[0-9]+$ ]] || return 1
+  now="$(date +%s)"
+  (( now < deadline ))
+}
+
+snooze_updates() {
+  local path directory deadline tmp
+  path="$(snooze_file)"
+  directory="$(dirname "$path")"
+  deadline=$(( $(date +%s) + 86400 ))
+  tmp="$path.tmp.$$"
+
+  mkdir -p "$directory"
+  printf '%s\n' "$deadline" > "$tmp"
+  mv "$tmp" "$path"
+}
+
+install_update() {
+  local tmp updated_bin
+  tmp="$(mktemp)" || return 1
+
+  if ! curl -fsSL "$INSTALL_URL" -o "$tmp"; then
+    rm -f "$tmp"
+    echo "Could not download the update. Continuing with the installed version." >&2
+    return 1
+  fi
+
+  if ! bash "$tmp"; then
+    rm -f "$tmp"
+    echo "Could not install the update. Continuing with the installed version." >&2
+    return 1
+  fi
+  rm -f "$tmp"
+
+  updated_bin="$(command -v claude-profile || true)"
+  [[ -n "$updated_bin" ]] || updated_bin="$0"
+  exec "$updated_bin" --skip-version-check "$@"
+}
+
+check_for_update() {
+  is_snoozed && return 0
+
+  local latest choice
+  latest="$(latest_version)" || return 0
+  is_newer_version "$latest" "$VERSION" || return 0
+
+  printf '\nclaude-profile %s → %s available\n\n' "$VERSION" "$latest" >&2
+
+  while true; do
+    echo '[o] Open release page' >&2
+    echo '[u] Update now' >&2
+    echo '[l] Remind me later (24 hours)' >&2
+    printf '> ' >&2
+
+    IFS= read -r -n 1 choice </dev/tty || return 0
+    echo >&2
+
+    case "$choice" in
+      o|O)
+        if command -v open >/dev/null 2>&1; then
+          open "$RELEASES_URL" >/dev/null 2>&1 || \
+            echo "Could not open $RELEASES_URL" >&2
+        else
+          echo "Releases: $RELEASES_URL" >&2
+        fi
+        return 0
+        ;;
+      u|U)
+        install_update "$@" || true
+        return 0
+        ;;
+      l|L)
+        snooze_updates
+        return 0
+        ;;
+      *)
+        echo 'Choose o, u, or l.' >&2
+        ;;
+    esac
+  done
 }
 
 validate_profile_name() {
@@ -60,6 +226,43 @@ profile_path() {
 
 profile_exists() {
   [[ -d "$(profile_path "$1")" ]]
+}
+
+active_profile() {
+  local name
+
+  if [[ -f "$ACTIVE_PROFILE_FILE" ]] && \
+     IFS= read -r name < "$ACTIVE_PROFILE_FILE" && \
+     [[ "$name" == "default" || "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] && \
+     profile_exists "$name"; then
+    printf '%s\n' "$name"
+  else
+    printf '%s\n' default
+  fi
+}
+
+set_active_profile() {
+  local name="$1"
+
+  if [[ "$name" != "default" ]]; then
+    validate_profile_name "$name"
+  fi
+  profile_exists "$name" || die "Profile '$name' does not exist."
+
+  local tmp="$ACTIVE_PROFILE_FILE.tmp.$$"
+  printf '%s\n' "$name" > "$tmp"
+  mv "$tmp" "$ACTIVE_PROFILE_FILE"
+}
+
+select_active_profile() {
+  local name="${1:-}"
+
+  if [[ -z "$name" ]]; then
+    name="$(select_profile)"
+  fi
+
+  set_active_profile "$name"
+  echo "Active profile: $name"
 }
 
 list_custom_profile_dirs() {
@@ -121,9 +324,18 @@ delete_profile() {
   echo "  $target"
   read -rp "Continue? [y/N] " answer
 
+  local was_active=0
+  if [[ -f "$ACTIVE_PROFILE_FILE" ]] && \
+     [[ "$(cat "$ACTIVE_PROFILE_FILE")" == "$name" ]]; then
+    was_active=1
+  fi
+
   case "$answer" in
     y|Y|yes|YES)
       rm -rf "$target"
+      if [[ "$was_active" -eq 1 ]]; then
+        set_active_profile default
+      fi
       echo "Deleted '$name'."
       ;;
     *)
@@ -276,9 +488,21 @@ repair_all_profiles() {
   [[ "$found" -eq 1 ]] || echo "No custom profiles found."
 }
 
-mkdir -p "$PROFILES_ROOT"
+main() {
+  parse_global_args "$@"
+  if (( ${#PARSED_ARGS[@]} > 0 )); then
+    set -- "${PARSED_ARGS[@]}"
+  else
+    set --
+  fi
 
-case "${1:-}" in
+  mkdir -p "$PROFILES_ROOT"
+
+  if should_check_for_update; then
+    check_for_update "$@"
+  fi
+
+  case "${1:-}" in
   --create)
     create_profile "${2:-}"
     ;;
@@ -305,27 +529,34 @@ case "${1:-}" in
     esac
     ;;
   --use)
-    shift
-    profile=""
-
-    if [[ $# -gt 0 && "$1" != "--" && "$1" != -* ]]; then
-      profile="$1"
+    select_active_profile "${2:-}"
+    ;;
+  --profile|-P)
+    profile="${2:-}"
+    [[ -n "$profile" ]] || die "Usage: claude-profile --profile <name> [-- <claude args>]"
+    shift 2
+    if [[ $# -gt 0 ]]; then
+      [[ "$1" == "--" ]] || \
+        die "Usage: claude-profile --profile <name> [-- <claude args>]"
       shift
-    else
-      profile="$(select_profile)"
     fi
-
-    [[ "${1:-}" != "--" ]] || shift
-
     use_profile "$profile" "$@"
     ;;
   --help|-h)
     usage
     ;;
+  --version|-V)
+    show_version
+    ;;
   "")
-    usage
+    use_profile "$(active_profile)"
     ;;
-  *)
-    die "Unknown option '$1'. Use --help."
-    ;;
-esac
+    *)
+      die "Unknown option '$1'. Use --help."
+      ;;
+  esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

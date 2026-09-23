@@ -1,0 +1,24 @@
+#!/usr/bin/expect -f
+set timeout 5
+set choice [lindex $argv 0]
+set command [lrange $argv 1 end]
+
+spawn -noecho {*}$command
+
+if {$choice ne ""} {
+  expect {
+    -re {\[o\] Open release page} {
+      send -- "$choice\r"
+    }
+    timeout {
+      exit 124
+    }
+    eof {
+      exit 125
+    }
+  }
+}
+
+expect eof
+set result [wait]
+exit [lindex $result 3]

@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$OPEN_TEST_LOG"
