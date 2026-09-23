@@ -20,7 +20,7 @@ for arg in "$@"; do
       previous="$installer_arg"
     done
     [[ -n "$output_path" ]] || exit 65
-    printf '#!/usr/bin/env bash\nprintf installed > "$INSTALL_TEST_LOG"\n' > "$output_path"
+    printf '#!/usr/bin/env bash\nmkdir -p "$HOME/.local/bin"\ncp "$UPDATED_CLI_FIXTURE" "$HOME/.local/bin/claude-profile"\nchmod +x "$HOME/.local/bin/claude-profile"\nprintf installed > "$INSTALL_TEST_LOG"\n' > "$output_path"
     exit 0
   fi
 done

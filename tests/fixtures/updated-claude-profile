@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+printf 'args=' >> "$INSTALLED_REEXEC_TEST_LOG"
+for arg in "$@"; do
+  printf '<%s>' "$arg" >> "$INSTALLED_REEXEC_TEST_LOG"
+done
+printf '\n' >> "$INSTALLED_REEXEC_TEST_LOG"

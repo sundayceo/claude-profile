@@ -86,7 +86,8 @@ run_interactive() {
   local curl_mode="$4"
   shift 4
 
-  mkdir -p "$home" "$cache"
+  mkdir -p "$home"
+  [[ -e "$cache" ]] || mkdir -p "$cache"
   HOME="$home" \
     XDG_CACHE_HOME="$cache" \
     PATH="$fake_bin:$PATH" \
@@ -95,6 +96,8 @@ run_interactive() {
     OPEN_TEST_LOG="$open_log" \
     INSTALL_TEST_LOG="$install_log" \
     REEXEC_TEST_LOG="$reexec_log" \
+    INSTALLED_REEXEC_TEST_LOG="$installed_reexec_log" \
+    UPDATED_CLI_FIXTURE="$ROOT_DIR/tests/fixtures/updated-claude-profile" \
     expect "$ROOT_DIR/tests/fixtures/run_interactive.exp" \
       "$input" "$CLI" "$@" 2>&1
 }
@@ -117,7 +120,8 @@ assert_contains "$output" 'claude-profile --version | -V' '--help documents vers
 fake_bin="$ROOT_DIR/tests/fixtures/bin"
 chmod +x "$fake_bin/claude" "$fake_bin/curl" \
   "$fake_bin/open" "$fake_bin/claude-profile" \
-  "$ROOT_DIR/tests/fixtures/run_interactive.exp"
+  "$ROOT_DIR/tests/fixtures/run_interactive.exp" \
+  "$ROOT_DIR/tests/fixtures/updated-claude-profile"
 
 home="$TEST_ROOT/profile-home"
 log="$TEST_ROOT/claude.log"
@@ -135,6 +139,15 @@ HOME="$home" PATH="$fake_bin:$PATH" CLAUDE_TEST_LOG="$log" \
 assert_file_eq 'work' "$home/.claude-custom-profiles/.active-profile" \
   '--use saves the active profile'
 assert_file_eq '' "$log" '--use saves without launching Claude'
+
+fresh_home="$TEST_ROOT/fresh-home"
+fresh_log="$TEST_ROOT/fresh-claude.log"
+mkdir -p "$fresh_home"
+: > "$fresh_log"
+HOME="$fresh_home" PATH="$fake_bin:$PATH" CLAUDE_TEST_LOG="$fresh_log" \
+  "$CLI" >/dev/null 2>&1 || true
+assert_file_eq $'config=<unset>\nargs=' "$fresh_log" \
+  'bare invocation launches default before its config directory exists'
 
 : > "$log"
 HOME="$home" PATH="$fake_bin:$PATH" CLAUDE_TEST_LOG="$log" \
@@ -201,13 +214,17 @@ curl_log="$TEST_ROOT/interactive-curl.log"
 open_log="$TEST_ROOT/open.log"
 install_log="$TEST_ROOT/install.log"
 reexec_log="$TEST_ROOT/reexec.log"
+installed_reexec_log="$TEST_ROOT/installed-reexec.log"
 : > "$curl_log"
 : > "$open_log"
 : > "$reexec_log"
+: > "$installed_reexec_log"
 
 interactive_home="$TEST_ROOT/interactive-home"
 interactive_cache="$TEST_ROOT/interactive-cache"
-output="$(run_interactive o "$interactive_home" "$interactive_cache" latest --version || true)"
+output="$(run_interactive o "$interactive_home" "$interactive_cache" latest --version)"
+interactive_status=$?
+assert_status 0 "$interactive_status" 'o continues with a successful original command'
 assert_contains "$output" 'claude-profile 0.2.0 → 0.3.0 available' \
   'interactive invocation announces a newer version'
 assert_contains "$output" '[o] Open release page' 'update prompt offers the release page'
@@ -215,7 +232,8 @@ assert_contains "$output" '[u] Update now' 'update prompt offers installation'
 assert_contains "$output" '[l] Remind me later (24 hours)' 'update prompt offers snoozing'
 assert_file_eq 'https://github.com/sundayceo/claude-profile/releases' "$open_log" \
   'o opens the releases page'
-assert_contains "$output" 'claude-profile 0.2.0' 'o continues the original command'
+assert_contains "$output" 'Releases: https://github.com/sundayceo/claude-profile/releases' \
+  'o continues the original command'
 
 : > "$curl_log"
 output="$(run_interactive l "$interactive_home" "$interactive_cache" latest --version || true)"
@@ -234,11 +252,22 @@ update_home="$TEST_ROOT/update-home"
 update_cache="$TEST_ROOT/update-cache"
 : > "$curl_log"
 : > "$reexec_log"
+: > "$installed_reexec_log"
 assert_file_missing "$install_log" 'installer has not run before choosing u'
 output="$(run_interactive u "$update_home" "$update_cache" latest --version || true)"
 assert_file_eq 'installed' "$install_log" 'u runs the official installer'
-assert_file_eq 'args=<--skip-version-check><--version>' "$reexec_log" \
-  'u restarts the original command with the version check disabled'
+assert_file_eq 'args=<--skip-version-check><--version>' "$installed_reexec_log" \
+  'u restarts the binary written by the installer'
+assert_file_eq '' "$reexec_log" 'u does not restart an older binary from PATH'
+
+blocked_cache="$TEST_ROOT/blocked-cache"
+: > "$blocked_cache"
+blocked_home="$TEST_ROOT/blocked-home"
+output="$(run_interactive l "$blocked_home" "$blocked_cache" latest --version)"
+blocked_status=$?
+assert_status 0 "$blocked_status" 'an unwritable snooze cache does not fail the command'
+assert_contains "$output" 'Releases: https://github.com/sundayceo/claude-profile/releases' \
+  'an unwritable snooze cache continues the original command'
 
 skip_home="$TEST_ROOT/skip-home"
 skip_cache="$TEST_ROOT/skip-cache"
@@ -264,7 +293,7 @@ assert_file_eq '' "$curl_log" 'non-interactive invocations skip release requests
 
 delete_home="$TEST_ROOT/delete-home"
 delete_log="$TEST_ROOT/delete-claude.log"
-mkdir -p "$delete_home/.claude" "$delete_home/.claude-custom-profiles/work"
+mkdir -p "$delete_home/.claude-custom-profiles/work"
 HOME="$delete_home" PATH="$fake_bin:$PATH" CLAUDE_TEST_LOG="$delete_log" \
   "$CLI" --use work >/dev/null 2>&1 || true
 printf 'y\n' | HOME="$delete_home" PATH="$fake_bin:$PATH" \
@@ -273,6 +302,16 @@ assert_file_eq 'default' "$delete_home/.claude-custom-profiles/.active-profile" 
   'deleting the active profile resets selection to default'
 assert_file_missing "$delete_home/.claude-custom-profiles/work" \
   'deleting a profile removes its directory'
+
+malformed_home="$TEST_ROOT/malformed-home"
+malformed_log="$TEST_ROOT/malformed-claude.log"
+mkdir -p "$malformed_home/.claude" "$malformed_home/.claude-custom-profiles/work"
+printf 'work\nextra\n' > "$malformed_home/.claude-custom-profiles/.active-profile"
+: > "$malformed_log"
+HOME="$malformed_home" PATH="$fake_bin:$PATH" CLAUDE_TEST_LOG="$malformed_log" \
+  "$CLI" >/dev/null 2>&1 || true
+assert_file_eq $'config=<unset>\nargs=' "$malformed_log" \
+  'a malformed multiline active-profile file falls back to default'
 
 boundary_home="$TEST_ROOT/boundary-home"
 boundary_log="$TEST_ROOT/boundary-claude.log"

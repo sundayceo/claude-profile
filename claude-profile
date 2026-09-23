@@ -136,9 +136,15 @@ snooze_updates() {
   deadline=$(( $(date +%s) + 86400 ))
   tmp="$path.tmp.$$"
 
-  mkdir -p "$directory"
-  printf '%s\n' "$deadline" > "$tmp"
-  mv "$tmp" "$path"
+  mkdir -p "$directory" 2>/dev/null || return 1
+  if ! printf '%s\n' "$deadline" > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! mv "$tmp" "$path"; then
+    rm -f "$tmp"
+    return 1
+  fi
 }
 
 install_update() {
@@ -158,8 +164,11 @@ install_update() {
   fi
   rm -f "$tmp"
 
-  updated_bin="$(command -v claude-profile || true)"
-  [[ -n "$updated_bin" ]] || updated_bin="$0"
+  updated_bin="${CLAUDE_PROFILE_INSTALL_DIR:-$HOME/.local/bin}/claude-profile"
+  if [[ ! -x "$updated_bin" ]]; then
+    echo "The update installed, but $updated_bin is not executable." >&2
+    return 1
+  fi
   exec "$updated_bin" --skip-version-check "$@"
 }
 
@@ -196,7 +205,9 @@ check_for_update() {
         return 0
         ;;
       l|L)
-        snooze_updates
+        if ! snooze_updates; then
+          echo 'Could not save the reminder. Continuing without snoozing.' >&2
+        fi
         return 0
         ;;
       *)
@@ -231,8 +242,12 @@ profile_exists() {
 active_profile() {
   local name
 
-  if [[ -f "$ACTIVE_PROFILE_FILE" ]] && \
-     IFS= read -r name < "$ACTIVE_PROFILE_FILE" && \
+  if [[ -f "$ACTIVE_PROFILE_FILE" ]]; then
+    name="$(cat "$ACTIVE_PROFILE_FILE")"
+  fi
+
+  if [[ -n "${name:-}" ]] && \
+     [[ "$name" != *$'\n'* ]] && \
      [[ "$name" == "default" || "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] && \
      profile_exists "$name"; then
     printf '%s\n' "$name"
@@ -246,8 +261,8 @@ set_active_profile() {
 
   if [[ "$name" != "default" ]]; then
     validate_profile_name "$name"
+    profile_exists "$name" || die "Profile '$name' does not exist."
   fi
-  profile_exists "$name" || die "Profile '$name' does not exist."
 
   local tmp="$ACTIVE_PROFILE_FILE.tmp.$$"
   printf '%s\n' "$name" > "$tmp"
@@ -391,7 +406,9 @@ use_profile() {
   local name="$1"
   shift || true
 
-  profile_exists "$name" || die "Profile '$name' does not exist."
+  if [[ "$name" != "default" ]]; then
+    profile_exists "$name" || die "Profile '$name' does not exist."
+  fi
 
   [[ -n "$CLAUDE_BIN" ]] || die "Could not find Claude executable in PATH."
 
