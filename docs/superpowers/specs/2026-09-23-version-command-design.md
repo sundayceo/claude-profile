@@ -18,9 +18,9 @@ Before dispatching a command, each interactive invocation follows GitHub's lates
 
 When a newer version exists, the CLI displays the installed and latest versions and offers three single-key choices:
 
-- `x` opens the GitHub releases page with the macOS `open` command and continues the original command.
-- `y` runs the repository's official installer, then restarts the original command with the newly installed executable.
-- `z` writes a snooze deadline under `${XDG_CACHE_HOME:-$HOME/.cache}/claude-profile/` and continues the original command. Checks remain suppressed for 24 hours.
+- `o` opens the GitHub releases page with the macOS `open` command and continues the original command.
+- `u` runs the repository's official installer, then restarts the original command with the newly installed executable.
+- `l` writes a snooze deadline under `${XDG_CACHE_HOME:-$HOME/.cache}/claude-profile/` and continues the original command. Checks remain suppressed for 24 hours.
 
 The prompt only appears when standard input and standard error are attached to a terminal. Non-interactive execution skips the update check and never blocks for input.
 
