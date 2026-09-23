@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="0.3.1"
+VERSION="0.4.0"
 set -euo pipefail
 
 DEFAULT_CONFIG="$HOME/.claude"
@@ -43,6 +43,7 @@ Commands:
   -p, --path <name>            Print a profile's configuration directory.
   -r, --repair <name>          Repair shared links for one custom profile.
   -a, --all                    With --repair or -r, repair every custom profile.
+  -f, --force                  With repair, keep default copies without prompting.
   -V, --version                Print the installed version and releases URL.
   -h, --help                   Show this help.
 
@@ -464,8 +465,107 @@ show_path() {
   profile_path "$name"
 }
 
+next_backup_path() {
+  local path="$1.claude-profile-backup"
+  local suffix=0
+
+  while [[ -e "$path" || -L "$path" ]]; do
+    suffix=$((suffix + 1))
+    path="$1.claude-profile-backup.$suffix"
+  done
+
+  printf '%s\n' "$path"
+}
+
+use_default_item() {
+  local item="$1"
+  local source="$2"
+  local dest="$3"
+  local backup
+  backup="$(next_backup_path "$dest")"
+
+  mv "$dest" "$backup"
+  ln -s "$source" "$dest"
+  printf "  backed up %s -> %s\n" "$item" "$backup"
+  printf "  repaired  %s -> %s\n" "$item" "$source"
+}
+
+use_profile_item() {
+  local item="$1"
+  local source="$2"
+  local dest="$3"
+  local backup
+  backup="$(next_backup_path "$source")"
+
+  mv "$source" "$backup"
+  if ! mv "$dest" "$source"; then
+    mv "$backup" "$source"
+    return 1
+  fi
+  if ! ln -s "$source" "$dest"; then
+    mv "$source" "$dest"
+    mv "$backup" "$source"
+    return 1
+  fi
+
+  printf "  backed up default %s -> %s\n" "$item" "$backup"
+  printf "  promoted  %s -> %s\n" "$item" "$source"
+  printf "  repaired  %s -> %s\n" "$item" "$source"
+}
+
+resolve_shared_item_conflict() {
+  local item="$1"
+  local source="$2"
+  local dest="$3"
+  local force="$4"
+  local choice
+
+  if [[ "$force" -eq 1 ]]; then
+    use_default_item "$item" "$source" "$dest"
+    return
+  fi
+
+  if diff -qr "$source" "$dest" >/dev/null 2>&1; then
+    printf "  identical %s; using default copy\n" "$item"
+    use_default_item "$item" "$source" "$dest"
+    return
+  fi
+
+  printf "\n  Differences for %s:\n" "$item"
+  diff -ru "$source" "$dest" || true
+  echo
+
+  while true; do
+    printf 'Choose [d]efault, [p]rofile, or [s]kip: ' >&2
+    if ! IFS= read -r choice </dev/tty 2>/dev/null; then
+      echo >&2
+      printf "  skip    %s (no terminal; use --force to keep default)\n" "$item"
+      return
+    fi
+
+    case "$choice" in
+      d|D)
+        use_default_item "$item" "$source" "$dest"
+        return
+        ;;
+      p|P)
+        use_profile_item "$item" "$source" "$dest"
+        return
+        ;;
+      s|S)
+        printf "  skip    %s (left unchanged)\n" "$item"
+        return
+        ;;
+      *)
+        echo 'Choose d, p, or s.' >&2
+        ;;
+    esac
+  done
+}
+
 repair_profile() {
   local name="$1"
+  local force="${2:-0}"
 
   if [[ "$name" == "default" ]]; then
     echo "Default profile needs no repair:"
@@ -484,7 +584,7 @@ repair_profile() {
   echo "  Path: $target"
   echo
 
-  local item source dest current backup suffix
+  local item source dest current
 
   for item in "${SHARED_ITEMS[@]}"; do
     source="$DEFAULT_CONFIG/$item"
@@ -510,16 +610,7 @@ repair_profile() {
     fi
 
     if [[ -e "$dest" ]]; then
-      backup="$dest.claude-profile-backup"
-      suffix=0
-      while [[ -e "$backup" || -L "$backup" ]]; do
-        suffix=$((suffix + 1))
-        backup="$dest.claude-profile-backup.$suffix"
-      done
-      mv "$dest" "$backup"
-      ln -s "$source" "$dest"
-      printf "  backed up %s -> %s\n" "$item" "$backup"
-      printf "  repaired  %s -> %s\n" "$item" "$source"
+      resolve_shared_item_conflict "$item" "$source" "$dest" "$force"
       continue
     fi
 
@@ -529,16 +620,53 @@ repair_profile() {
 }
 
 repair_all_profiles() {
+  local force="${1:-0}"
   local dir found=0
 
   while IFS= read -r dir; do
     [[ -n "$dir" ]] || continue
     found=1
-    repair_profile "$(basename "$dir")"
+    repair_profile "$(basename "$dir")" "$force"
     echo
   done < <(list_custom_profile_dirs)
 
   [[ "$found" -eq 1 ]] || echo "No custom profiles found."
+}
+
+run_repair() {
+  local target=''
+  local force=0
+  local arg
+
+  for arg in "$@"; do
+    case "$arg" in
+      --force|-f)
+        force=1
+        ;;
+      --all|-a)
+        [[ -z "$target" ]] || \
+          die "Usage: claude-profile --repair <name> [--force] | --repair --all [--force]"
+        target='--all'
+        ;;
+      -* )
+        die "Unknown repair option '$arg'."
+        ;;
+      *)
+        [[ -z "$target" ]] || \
+          die "Usage: claude-profile --repair <name> [--force] | --repair --all [--force]"
+        target="$arg"
+        ;;
+    esac
+  done
+
+  [[ -n "$target" ]] || \
+    die "Usage: claude-profile --repair <name> [--force] | --repair --all [--force]"
+
+  if [[ "$target" == '--all' ]]; then
+    repair_all_profiles "$force"
+  else
+    repair_profile "$target" "$force"
+  fi
 }
 
 main() {
@@ -569,17 +697,8 @@ main() {
     show_path "${2:-}"
     ;;
   --repair|-r)
-    case "${2:-}" in
-      --all|-a)
-        repair_all_profiles
-        ;;
-      "")
-        die "Usage: claude-profile --repair <name> | --repair --all"
-        ;;
-      *)
-        repair_profile "$2"
-        ;;
-    esac
+    shift
+    run_repair "$@"
     ;;
   --use|-u)
     select_active_profile "${2:-}"

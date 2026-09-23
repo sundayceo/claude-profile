@@ -146,7 +146,18 @@ run_interactive() {
       "$input" "$CLI" "$@" 2>&1
 }
 
-expected_version='claude-profile 0.3.1
+run_repair_interactive() {
+  local choice="$1"
+  local home="$2"
+  shift 2
+
+  HOME="$home" \
+    PATH="$fake_bin:$PATH" \
+    expect "$ROOT_DIR/tests/fixtures/run_repair_interactive.exp" \
+      "$choice" "$CLI" --skip-version-check "$@" 2>&1
+}
+
+expected_version='claude-profile 0.4.0
 Releases: https://github.com/sundayceo/claude-profile/releases'
 
 home="$TEST_ROOT/version-home"
@@ -172,6 +183,7 @@ assert_contains "$output" '-P, --profile <name>' '--help describes profile alias
 assert_contains "$output" '-p, --path <name>' '--help describes path aliases'
 assert_contains "$output" '-r, --repair <name>' '--help describes repair aliases'
 assert_contains "$output" '-a, --all' '--help describes repair-all aliases'
+assert_contains "$output" '-f, --force' '--help describes force aliases'
 assert_contains "$output" '-V, --version' '--help describes version aliases'
 assert_contains "$output" '-h, --help' '--help describes help aliases'
 assert_contains "$output" '-S, --skip-version-check' '--help describes skip aliases'
@@ -247,7 +259,7 @@ curl_log="$TEST_ROOT/curl.log"
 : > "$curl_log"
 output="$(PATH="$fake_bin:$PATH" CURL_TEST_LOG="$curl_log" CURL_TEST_MODE=latest \
   bash -c 'source "$1"; latest_version' _ "$CLI" 2>/dev/null || true)"
-assert_eq '0.4.0' "$output" 'latest_version extracts the redirected release tag'
+assert_eq '0.5.0' "$output" 'latest_version extracts the redirected release tag'
 
 output="$(PATH="$fake_bin:$PATH" CURL_TEST_MODE=offline \
   bash -c 'source "$1"; latest_version' _ "$CLI" 2>/dev/null || true)"
@@ -286,7 +298,7 @@ open_cache="$TEST_ROOT/open-cache"
 output="$(run_interactive ol "$open_home" "$open_cache" latest --version)"
 interactive_status=$?
 assert_status 0 "$interactive_status" 'o waits for l before continuing'
-assert_contains "$output" 'claude-profile 0.3.1 → 0.4.0 available' \
+assert_contains "$output" 'claude-profile 0.4.0 → 0.5.0 available' \
   'interactive invocation announces a newer version'
 assert_occurrences "$output" '[o] Open release page' 2 \
   'o redisplays the update prompt'
@@ -317,7 +329,7 @@ fi
 : > "$curl_log"
 output="$(run_interactive '' "$interactive_home" "$interactive_cache" latest --version || true)"
 assert_file_eq '' "$curl_log" 'a snoozed invocation performs no release request'
-assert_contains "$output" 'claude-profile 0.3.1' 'a snoozed invocation continues'
+assert_contains "$output" 'claude-profile 0.4.0' 'a snoozed invocation continues'
 
 update_home="$TEST_ROOT/update-home"
 update_cache="$TEST_ROOT/update-cache"
@@ -346,13 +358,13 @@ skip_cache="$TEST_ROOT/skip-cache"
 output="$(run_interactive '' "$skip_home" "$skip_cache" latest \
   --version --skip-version-check || true)"
 assert_file_eq '' "$curl_log" '--skip-version-check prevents release requests'
-assert_contains "$output" 'claude-profile 0.3.1' \
+assert_contains "$output" 'claude-profile 0.4.0' \
   '--skip-version-check continues the original command'
 
 offline_home="$TEST_ROOT/offline-home"
 offline_cache="$TEST_ROOT/offline-cache"
 output="$(run_interactive '' "$offline_home" "$offline_cache" offline --version || true)"
-assert_contains "$output" 'claude-profile 0.3.1' 'offline update checks do not block commands'
+assert_contains "$output" 'claude-profile 0.4.0' 'offline update checks do not block commands'
 assert_not_contains "$output" 'simulated network failure' \
   'offline update checks fail silently'
 
@@ -447,7 +459,7 @@ args=<--model><opus>" "$alias_log" '-P launches a one-off profile'
 output="$(HOME="$alias_home" "$CLI" -r work 2>&1 || true)"
 assert_contains "$output" 'Repairing:' '-r repairs one profile'
 
-output="$(HOME="$alias_home" "$CLI" -r -a 2>&1 || true)"
+output="$(HOME="$alias_home" "$CLI" -r -a -f 2>&1 || true)"
 assert_contains "$output" 'Repairing:' '-r -a repairs all custom profiles'
 
 repair_home="$TEST_ROOT/repair-home"
@@ -465,7 +477,7 @@ printf '%s\n' 'default skill' > "$repair_home/.claude/skills/default.md"
 printf '%s\n' 'profile skill' > \
   "$repair_home/.claude-custom-profiles/work/skills/profile.md"
 
-output="$(HOME="$repair_home" "$CLI" --repair --all 2>&1 || true)"
+output="$(HOME="$repair_home" "$CLI" --repair --all --force 2>&1 || true)"
 assert_symlink_to "$repair_home/.claude/settings.json" \
   "$repair_home/.claude-custom-profiles/work/settings.json" \
   '--repair --all syncs settings.json with the default profile'
@@ -494,6 +506,87 @@ assert_symlink_to "$repair_home/.claude/agents" \
 assert_symlink_to "$repair_home/.claude/commands" \
   "$repair_home/.claude-custom-profiles/work/commands" \
   '--repair --all syncs commands with the default profile'
+assert_not_contains "$output" '@@' '--force does not show a diff'
+
+force_order_home="$TEST_ROOT/force-order-home"
+mkdir -p "$force_order_home/.claude" \
+  "$force_order_home/.claude-custom-profiles/work"
+printf '%s\n' 'default' > "$force_order_home/.claude/settings.json"
+printf '%s\n' 'profile' > \
+  "$force_order_home/.claude-custom-profiles/work/settings.json"
+HOME="$force_order_home" "$CLI" --skip-version-check \
+  --repair --force work >/dev/null 2>&1 || true
+assert_symlink_to "$force_order_home/.claude/settings.json" \
+  "$force_order_home/.claude-custom-profiles/work/settings.json" \
+  '--force is accepted before a repair profile name'
+
+profile_choice_home="$TEST_ROOT/profile-choice-home"
+mkdir -p "$profile_choice_home/.claude" \
+  "$profile_choice_home/.claude-custom-profiles/work"
+printf '%s\n' '{"theme":"dark"}' > \
+  "$profile_choice_home/.claude/settings.json"
+printf '%s\n' '{"theme":"light"}' > \
+  "$profile_choice_home/.claude-custom-profiles/work/settings.json"
+output="$(run_repair_interactive p "$profile_choice_home" --repair work)"
+assert_contains "$output" '-{"theme":"dark"}' \
+  'normal repair shows the default side of the diff'
+assert_contains "$output" '+{"theme":"light"}' \
+  'normal repair shows the profile side of the diff'
+assert_file_eq '{"theme":"light"}' \
+  "$profile_choice_home/.claude/settings.json" \
+  'p promotes the profile copy to the default configuration'
+assert_file_eq '{"theme":"dark"}' \
+  "$profile_choice_home/.claude/settings.json.claude-profile-backup" \
+  'p backs up the displaced default copy'
+assert_symlink_to "$profile_choice_home/.claude/settings.json" \
+  "$profile_choice_home/.claude-custom-profiles/work/settings.json" \
+  'p links the profile to its promoted copy'
+
+default_choice_home="$TEST_ROOT/default-choice-home"
+mkdir -p "$default_choice_home/.claude" \
+  "$default_choice_home/.claude-custom-profiles/work"
+printf '%s\n' 'default' > "$default_choice_home/.claude/settings.json"
+printf '%s\n' 'profile' > \
+  "$default_choice_home/.claude-custom-profiles/work/settings.json"
+output="$(run_repair_interactive d "$default_choice_home" --repair work)"
+assert_file_eq 'default' "$default_choice_home/.claude/settings.json" \
+  'd keeps the default copy canonical'
+assert_file_eq 'profile' \
+  "$default_choice_home/.claude-custom-profiles/work/settings.json.claude-profile-backup" \
+  'd backs up the displaced profile copy'
+assert_symlink_to "$default_choice_home/.claude/settings.json" \
+  "$default_choice_home/.claude-custom-profiles/work/settings.json" \
+  'd links the profile to the default copy'
+
+skip_choice_home="$TEST_ROOT/skip-choice-home"
+mkdir -p "$skip_choice_home/.claude" \
+  "$skip_choice_home/.claude-custom-profiles/work"
+printf '%s\n' 'default' > "$skip_choice_home/.claude/keybindings.json"
+printf '%s\n' 'profile' > \
+  "$skip_choice_home/.claude-custom-profiles/work/keybindings.json"
+output="$(run_repair_interactive s "$skip_choice_home" --repair work)"
+assert_file_eq 'default' "$skip_choice_home/.claude/keybindings.json" \
+  's keeps the default copy unchanged'
+assert_file_eq 'profile' \
+  "$skip_choice_home/.claude-custom-profiles/work/keybindings.json" \
+  's keeps the profile copy unchanged'
+assert_file_missing \
+  "$skip_choice_home/.claude-custom-profiles/work/keybindings.json.claude-profile-backup" \
+  's does not create a backup'
+
+identical_home="$TEST_ROOT/identical-home"
+mkdir -p "$identical_home/.claude" \
+  "$identical_home/.claude-custom-profiles/work"
+printf '%s\n' 'same' > "$identical_home/.claude/settings.json"
+printf '%s\n' 'same' > \
+  "$identical_home/.claude-custom-profiles/work/settings.json"
+output="$(HOME="$identical_home" "$CLI" --skip-version-check \
+  --repair work 2>&1 || true)"
+assert_contains "$output" 'identical' \
+  'normal repair does not prompt for identical copies'
+assert_symlink_to "$identical_home/.claude/settings.json" \
+  "$identical_home/.claude-custom-profiles/work/settings.json" \
+  'normal repair links identical copies automatically'
 
 output="$(HOME="$alias_home" "$CLI" -V 2>&1 || true)"
 assert_eq "$expected_version" "$output" '-V shows the version'

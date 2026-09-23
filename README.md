@@ -60,10 +60,22 @@ claude-profile --repair --all
 ```
 
 Profiles share `settings.json`, `keybindings.json`, `skills`, `agents`, and
-`commands` with the default profile. When repair finds an existing
-profile-specific file or directory at one of these paths, it preserves that
-item with a `.claude-profile-backup` suffix before creating the shared link. A
-numeric suffix is added if that backup name already exists.
+`commands` with the default profile. When normal repair finds different copies,
+it shows a unified diff and asks whether the default or profile copy should
+become canonical, or whether to skip that item. Identical copies are linked
+without prompting.
+
+Use `--force` or `-f` to keep the default copy for every conflict without
+showing diffs or prompting:
+
+```bash
+claude-profile --repair --all --force
+claude-profile -r -a -f
+```
+
+Repair preserves every displaced file or directory with a
+`.claude-profile-backup` suffix. A numeric suffix is added if that backup name
+already exists.
 
 ## Command Reference
 
@@ -80,6 +92,7 @@ profile. If no profile has been selected, it uses `default`.
 | `-p` | `--path <name>` | Print a profile's configuration directory. |
 | `-r` | `--repair <name>` | Repair shared links for one custom profile. |
 | `-a` | `--all` | Use with repair to repair every custom profile. |
+| `-f` | `--force` | With repair, keep default copies without prompting. |
 | `-V` | `--version` | Print the installed version and releases URL. |
 | `-h` | `--help` | Show command help. |
 | `-S` | `--skip-version-check` | Skip the update check for one invocation. |
