@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="${1:-}"
+
+if [[ -z "$VERSION" ]]; then
+  echo "Usage: ./scripts/release <version>"
+  exit 1
+fi
+
+VERSION="${VERSION#v}"
+TAG="v$VERSION"
+
+CURRENT_VERSION="$(
+  grep -m1 '^VERSION=' claude-profile |
+  sed -E 's/^VERSION=["'\'']?([^"'\'']+)["'\'']?$/\1/'
+)"
+
+if [[ "$CURRENT_VERSION" != "$VERSION" ]]; then
+  echo "Version mismatch: script=$CURRENT_VERSION requested=$VERSION"
+  exit 1
+fi
+
+git diff --quiet
+git diff --cached --quiet
+
+rm -rf dist
+mkdir -p dist
+
+cp claude-profile dist/claude-profile
+chmod +x dist/claude-profile
+
+(
+  cd dist
+  shasum -a 256 claude-profile > claude-profile.sha256
+)
+
+git tag -a "$TAG" -m "claude-profile $VERSION"
+git push origin main
+git push origin "$TAG"
+
+gh release create "$TAG" \
+  dist/claude-profile \
+  dist/claude-profile.sha256 \
+  --verify-tag \
+  --generate-notes \
+  --latest

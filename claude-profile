@@ -1,0 +1,330 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DEFAULT_CONFIG="$HOME/.claude"
+PROFILES_ROOT="$HOME/.claude-custom-profiles"
+
+SHARED_ITEMS=(
+  skills
+  agents
+  commands
+)
+
+CLAUDE_BIN="$(type -P claude || true)"
+
+die() {
+  echo "Error: $*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<EOF
+Claude Profile Manager
+
+Usage:
+  claude-profile --create <name>
+  claude-profile --delete <name>
+  claude-profile --list
+  claude-profile --use [name] [-- <claude args>]
+  claude-profile --path <name>
+  claude-profile --repair <name>
+  claude-profile --repair --all
+  claude-profile --help
+
+Default:
+  default -> $DEFAULT_CONFIG
+
+Custom profiles:
+  $PROFILES_ROOT/<name>
+EOF
+}
+
+validate_profile_name() {
+  local name="$1"
+
+  [[ -n "$name" ]] || die "Profile name cannot be empty."
+  [[ "$name" != "default" ]] || die "'default' is reserved for $DEFAULT_CONFIG"
+
+  [[ "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || \
+    die "Invalid profile name '$name'."
+}
+
+profile_path() {
+  if [[ "$1" == "default" ]]; then
+    printf '%s\n' "$DEFAULT_CONFIG"
+  else
+    printf '%s/%s\n' "$PROFILES_ROOT" "$1"
+  fi
+}
+
+profile_exists() {
+  [[ -d "$(profile_path "$1")" ]]
+}
+
+list_custom_profile_dirs() {
+  [[ -d "$PROFILES_ROOT" ]] || return 0
+
+  find "$PROFILES_ROOT" \
+    -mindepth 1 \
+    -maxdepth 1 \
+    -type d \
+    -print 2>/dev/null | sort
+}
+
+create_shared_links() {
+  local target="$1"
+  local item source dest
+
+  for item in "${SHARED_ITEMS[@]}"; do
+    source="$DEFAULT_CONFIG/$item"
+    dest="$target/$item"
+
+    [[ -e "$source" || -L "$source" ]] || continue
+    [[ -e "$dest" || -L "$dest" ]] || ln -s "$source" "$dest"
+  done
+}
+
+create_profile() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "Usage: claude-profile --create <name>"
+
+  validate_profile_name "$name"
+
+  local target
+  target="$(profile_path "$name")"
+
+  [[ ! -e "$target" && ! -L "$target" ]] || \
+    die "Profile '$name' already exists: $target"
+
+  mkdir -p "$target"
+  create_shared_links "$target"
+
+  echo "Created profile:"
+  echo "  Name: $name"
+  echo "  Path: $target"
+}
+
+delete_profile() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "Usage: claude-profile --delete <name>"
+  [[ "$name" != "default" ]] || die "Default profile cannot be deleted."
+
+  validate_profile_name "$name"
+
+  local target
+  target="$(profile_path "$name")"
+
+  [[ -d "$target" ]] || die "Profile '$name' does not exist: $target"
+
+  echo "Delete:"
+  echo "  $target"
+  read -rp "Continue? [y/N] " answer
+
+  case "$answer" in
+    y|Y|yes|YES)
+      rm -rf "$target"
+      echo "Deleted '$name'."
+      ;;
+    *)
+      echo "Cancelled."
+      ;;
+  esac
+}
+
+list_profiles() {
+  printf "%-20s %-10s %s\n" "PROFILE" "TYPE" "CONFIG DIRECTORY"
+  printf "%-20s %-10s %s\n" "-------" "----" "----------------"
+  printf "%-20s %-10s %s\n" "default" "default" "$DEFAULT_CONFIG"
+
+  local dir
+  while IFS= read -r dir; do
+    [[ -n "$dir" ]] || continue
+    printf "%-20s %-10s %s\n" \
+      "$(basename "$dir")" "custom" "$dir"
+  done < <(list_custom_profile_dirs)
+}
+
+select_profile() {
+  local profiles=("default")
+  local dir i name path choice
+
+  while IFS= read -r dir; do
+    [[ -n "$dir" ]] || continue
+    profiles+=("$(basename "$dir")")
+  done < <(list_custom_profile_dirs)
+
+  echo "Choose Claude profile:" >&2
+  echo >&2
+
+  for i in "${!profiles[@]}"; do
+    name="${profiles[$i]}"
+    path="$(profile_path "$name")"
+
+    printf "  %d) %-18s %s\n" \
+      "$((i + 1))" "$name" "$path" >&2
+  done
+
+  echo >&2
+  read -rp "Profile [1]: " choice </dev/tty
+  choice="${choice:-1}"
+
+  [[ "$choice" =~ ^[0-9]+$ ]] || die "Invalid selection."
+  (( choice >= 1 && choice <= ${#profiles[@]} )) || die "Invalid selection."
+
+  printf '%s\n' "${profiles[$((choice - 1))]}"
+}
+
+use_profile() {
+  local name="$1"
+  shift || true
+
+  profile_exists "$name" || die "Profile '$name' does not exist."
+
+  [[ -n "$CLAUDE_BIN" ]] || die "Could not find Claude executable in PATH."
+
+  local path
+  path="$(profile_path "$name")"
+
+  echo "Using Claude profile:"
+  echo "  Name: $name"
+  echo "  Path: $path"
+  echo
+
+  if [[ "$name" == "default" ]]; then
+    unset CLAUDE_CONFIG_DIR
+  else
+    export CLAUDE_CONFIG_DIR="$path"
+  fi
+
+  exec "$CLAUDE_BIN" "$@"
+}
+
+show_path() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "Usage: claude-profile --path <name>"
+
+  profile_exists "$name" || die "Profile '$name' does not exist."
+  profile_path "$name"
+}
+
+repair_profile() {
+  local name="$1"
+
+  if [[ "$name" == "default" ]]; then
+    echo "Default profile needs no repair:"
+    echo "  $DEFAULT_CONFIG"
+    return
+  fi
+
+  validate_profile_name "$name"
+
+  local target
+  target="$(profile_path "$name")"
+  [[ -d "$target" ]] || die "Profile '$name' does not exist."
+
+  echo "Repairing:"
+  echo "  Name: $name"
+  echo "  Path: $target"
+  echo
+
+  local item source dest current
+
+  for item in "${SHARED_ITEMS[@]}"; do
+    source="$DEFAULT_CONFIG/$item"
+    dest="$target/$item"
+
+    if [[ ! -e "$source" && ! -L "$source" ]]; then
+      printf "  skip    %s (source missing)\n" "$item"
+      continue
+    fi
+
+    if [[ -L "$dest" ]]; then
+      current="$(readlink "$dest")"
+
+      if [[ "$current" == "$source" ]]; then
+        printf "  ok      %s -> %s\n" "$item" "$source"
+      else
+        rm "$dest"
+        ln -s "$source" "$dest"
+        printf "  repaired %s -> %s\n" "$item" "$source"
+      fi
+
+      continue
+    fi
+
+    if [[ -e "$dest" ]]; then
+      printf "  skip    %s (existing non-symlink left untouched)\n" "$item"
+      continue
+    fi
+
+    ln -s "$source" "$dest"
+    printf "  created %s -> %s\n" "$item" "$source"
+  done
+}
+
+repair_all_profiles() {
+  local dir found=0
+
+  while IFS= read -r dir; do
+    [[ -n "$dir" ]] || continue
+    found=1
+    repair_profile "$(basename "$dir")"
+    echo
+  done < <(list_custom_profile_dirs)
+
+  [[ "$found" -eq 1 ]] || echo "No custom profiles found."
+}
+
+mkdir -p "$PROFILES_ROOT"
+
+case "${1:-}" in
+  --create)
+    create_profile "${2:-}"
+    ;;
+  --delete)
+    delete_profile "${2:-}"
+    ;;
+  --list)
+    list_profiles
+    ;;
+  --path)
+    show_path "${2:-}"
+    ;;
+  --repair)
+    case "${2:-}" in
+      --all)
+        repair_all_profiles
+        ;;
+      "")
+        die "Usage: claude-profile --repair <name> | --repair --all"
+        ;;
+      *)
+        repair_profile "$2"
+        ;;
+    esac
+    ;;
+  --use)
+    shift
+    profile=""
+
+    if [[ $# -gt 0 && "$1" != "--" && "$1" != -* ]]; then
+      profile="$1"
+      shift
+    else
+      profile="$(select_profile)"
+    fi
+
+    [[ "${1:-}" != "--" ]] || shift
+
+    use_profile "$profile" "$@"
+    ;;
+  --help|-h)
+    usage
+    ;;
+  "")
+    usage
+    ;;
+  *)
+    die "Unknown option '$1'. Use --help."
+    ;;
+esac
