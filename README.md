@@ -4,36 +4,8 @@ CLI for managing multiple Claude Code profiles.
 
 ## Installation
 
-Install the latest release:
-
-
-## Installation
-
-Install the latest release:
-
 ```bash
-mkdir -p "$HOME/bin"
-
-curl -fsSL \
-  https://github.com/sundayceo/claude-profile/releases/latest/download/claude-profile \
-  -o "$HOME/bin/claude-profile"
-
-chmod +x "$HOME/bin/claude-profile"
-```
-
-Make sure `~/bin` is on your `PATH`:
-
-```bash
-grep -Fqx 'export PATH="$HOME/bin:$PATH"' "$HOME/.zshrc" 2>/dev/null || \
-  echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.zshrc"
-
-source "$HOME/.zshrc"
-```
-
-Verify the installation:
-
-```bash
-claude-profile --version
+curl -fsSL https://raw.githubusercontent.com/sundayceo/claude-profile/main/install.sh | bash
 ```
 
 ## Quick Start
