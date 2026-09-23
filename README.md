@@ -95,8 +95,9 @@ claude-profile --version
 
 On interactive invocations, `claude-profile` checks whether GitHub has a newer
 release. When an update is available, choose `o` to open the release page, `u`
-to install it, or `l` to be reminded again in 24 hours. Network failures never
-block the requested command.
+to install it, or `l` to be reminded again in 24 hours. Opening the release
+page returns to the update choices; only `u` and `l` continue the command.
+Network failures never block the requested command.
 
 Skip the check for a single invocation by placing `--skip-version-check`
 anywhere before the `--` argument boundary:

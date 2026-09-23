@@ -30,7 +30,7 @@ case "${CURL_TEST_MODE:-latest}" in
     printf '%s' 'https://github.com/sundayceo/claude-profile/releases/tag/v0.4.0'
     ;;
   current)
-    printf '%s' 'https://github.com/sundayceo/claude-profile/releases/tag/v0.3.0'
+    printf '%s' 'https://github.com/sundayceo/claude-profile/releases/tag/v0.3.1'
     ;;
   malformed)
     printf '%s' 'https://github.com/sundayceo/claude-profile/releases/tag/latest'

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="0.3.0"
+VERSION="0.3.1"
 set -euo pipefail
 
 DEFAULT_CONFIG="$HOME/.claude"
@@ -205,7 +205,7 @@ check_for_update() {
         else
           echo "Releases: $RELEASES_URL" >&2
         fi
-        return 0
+        continue
         ;;
       u|U)
         install_update "$@" || true

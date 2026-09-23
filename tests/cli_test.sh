@@ -44,6 +44,26 @@ assert_not_contains() {
   fi
 }
 
+assert_occurrences() {
+  local haystack="$1"
+  local needle="$2"
+  local expected="$3"
+  local message="$4"
+  local remainder="$haystack"
+  local actual=0
+
+  while [[ "$remainder" == *"$needle"* ]]; do
+    remainder="${remainder#*"$needle"}"
+    actual=$((actual + 1))
+  done
+
+  if [[ "$actual" -ne "$expected" ]]; then
+    printf 'FAIL: %s\nexpected occurrences: %s\nactual occurrences: %s\n' \
+      "$message" "$expected" "$actual" >&2
+    failures=$((failures + 1))
+  fi
+}
+
 assert_file_eq() {
   local expected="$1"
   local path="$2"
@@ -112,7 +132,7 @@ run_interactive() {
       "$input" "$CLI" "$@" 2>&1
 }
 
-expected_version='claude-profile 0.3.0
+expected_version='claude-profile 0.3.1
 Releases: https://github.com/sundayceo/claude-profile/releases'
 
 home="$TEST_ROOT/version-home"
@@ -247,22 +267,25 @@ installed_reexec_log="$TEST_ROOT/installed-reexec.log"
 : > "$reexec_log"
 : > "$installed_reexec_log"
 
-interactive_home="$TEST_ROOT/interactive-home"
-interactive_cache="$TEST_ROOT/interactive-cache"
-output="$(run_interactive o "$interactive_home" "$interactive_cache" latest --version)"
+open_home="$TEST_ROOT/open-home"
+open_cache="$TEST_ROOT/open-cache"
+output="$(run_interactive ol "$open_home" "$open_cache" latest --version)"
 interactive_status=$?
-assert_status 0 "$interactive_status" 'o continues with a successful original command'
-assert_contains "$output" 'claude-profile 0.3.0 → 0.4.0 available' \
+assert_status 0 "$interactive_status" 'o waits for l before continuing'
+assert_contains "$output" 'claude-profile 0.3.1 → 0.4.0 available' \
   'interactive invocation announces a newer version'
-assert_contains "$output" '[o] Open release page' 'update prompt offers the release page'
+assert_occurrences "$output" '[o] Open release page' 2 \
+  'o redisplays the update prompt'
 assert_contains "$output" '[u] Update now' 'update prompt offers installation'
 assert_contains "$output" '[l] Remind me later (24 hours)' 'update prompt offers snoozing'
 assert_file_eq 'https://github.com/sundayceo/claude-profile/releases' "$open_log" \
   'o opens the releases page'
 assert_contains "$output" 'Releases: https://github.com/sundayceo/claude-profile/releases' \
-  'o continues the original command'
+  'l continues the original command after o'
 
 : > "$curl_log"
+interactive_home="$TEST_ROOT/interactive-home"
+interactive_cache="$TEST_ROOT/interactive-cache"
 output="$(run_interactive l "$interactive_home" "$interactive_cache" latest --version || true)"
 snooze_file="$interactive_cache/claude-profile/version-check-snooze-until"
 if [[ ! -f "$snooze_file" ]] || ! [[ "$(cat "$snooze_file" 2>/dev/null)" =~ ^[0-9]+$ ]]; then
@@ -280,7 +303,7 @@ fi
 : > "$curl_log"
 output="$(run_interactive '' "$interactive_home" "$interactive_cache" latest --version || true)"
 assert_file_eq '' "$curl_log" 'a snoozed invocation performs no release request'
-assert_contains "$output" 'claude-profile 0.3.0' 'a snoozed invocation continues'
+assert_contains "$output" 'claude-profile 0.3.1' 'a snoozed invocation continues'
 
 update_home="$TEST_ROOT/update-home"
 update_cache="$TEST_ROOT/update-cache"
@@ -309,13 +332,13 @@ skip_cache="$TEST_ROOT/skip-cache"
 output="$(run_interactive '' "$skip_home" "$skip_cache" latest \
   --version --skip-version-check || true)"
 assert_file_eq '' "$curl_log" '--skip-version-check prevents release requests'
-assert_contains "$output" 'claude-profile 0.3.0' \
+assert_contains "$output" 'claude-profile 0.3.1' \
   '--skip-version-check continues the original command'
 
 offline_home="$TEST_ROOT/offline-home"
 offline_cache="$TEST_ROOT/offline-cache"
 output="$(run_interactive '' "$offline_home" "$offline_cache" offline --version || true)"
-assert_contains "$output" 'claude-profile 0.3.0' 'offline update checks do not block commands'
+assert_contains "$output" 'claude-profile 0.3.1' 'offline update checks do not block commands'
 assert_not_contains "$output" 'simulated network failure' \
   'offline update checks fail silently'
 
