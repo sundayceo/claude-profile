@@ -65,11 +65,36 @@ Repair shared configuration symlinks:
 claude-profile --repair --all
 ```
 
-Profiles share `settings.json`, `keybindings.json`, `skills`, `agents`, and
-`commands` with the default profile. When normal repair finds different copies,
-it shows a unified diff and asks whether the default or profile copy should
-become canonical, or whether to skip that item. Identical copies are linked
-without prompting.
+Profiles share user-authored configuration with the default profile:
+
+```text
+settings.json                 keybindings.json
+CLAUDE.md                     skills/
+agents/                       commands/
+rules/                        output-styles/
+workflows/                    themes/
+hooks/
+```
+
+Plugin installations and third-party plugin configuration are also shared:
+
+```text
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/blocklist.json
+plugins/marketplaces/
+plugins/cache/
+plugins/data/
+```
+
+Claude authentication and generated account/session state remain isolated,
+including `.claude.json`, `.credentials.json`, `plugins/synced/`, `projects/`,
+`agent-memory/`, history, sessions, jobs, daemon state, and telemetry.
+
+When normal repair finds different copies, it shows a unified diff and asks
+whether the default or profile copy should become canonical, whether to merge
+them, or whether to skip that item. Identical copies are linked without
+prompting.
 
 Use `--force` or `-f` to keep the default copy for every conflict without
 showing diffs or prompting:
@@ -78,6 +103,11 @@ showing diffs or prompting:
 claude-profile --repair --all --force
 claude-profile -r -a -f
 ```
+
+Choose `m` during normal repair to merge a conflict. JSON objects are merged
+recursively, arrays are combined without duplicates, and profile scalar values
+win. Directory trees are combined with profile files winning same-path
+conflicts. JSON merging requires `jq`.
 
 Repair preserves every displaced file or directory with a
 `.claude-profile-backup` suffix. A numeric suffix is added if that backup name

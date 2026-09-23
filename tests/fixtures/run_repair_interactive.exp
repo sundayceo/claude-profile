@@ -6,7 +6,7 @@ set command [lrange $argv 1 end]
 spawn -noecho {*}$command
 
 expect {
-  -re {Choose \[d\]efault, \[p\]rofile, or \[s\]kip:} {
+  -re {Choose \[d\]efault, \[p\]rofile, \[m\]erge, or \[s\]kip:} {
     send -- "$choice\r"
   }
   timeout {

@@ -157,7 +157,7 @@ run_repair_interactive() {
       "$choice" "$CLI" --skip-version-check "$@" 2>&1
 }
 
-expected_version='claude-profile 0.4.1
+expected_version='claude-profile 0.5.0
 Releases: https://github.com/sundayceo/claude-profile/releases'
 
 home="$TEST_ROOT/version-home"
@@ -266,7 +266,7 @@ curl_log="$TEST_ROOT/curl.log"
 : > "$curl_log"
 output="$(PATH="$fake_bin:$PATH" CURL_TEST_LOG="$curl_log" CURL_TEST_MODE=latest \
   bash -c 'source "$1"; latest_version' _ "$CLI" 2>/dev/null || true)"
-assert_eq '0.5.0' "$output" 'latest_version extracts the redirected release tag'
+assert_eq '0.6.0' "$output" 'latest_version extracts the redirected release tag'
 
 output="$(PATH="$fake_bin:$PATH" CURL_TEST_MODE=offline \
   bash -c 'source "$1"; latest_version' _ "$CLI" 2>/dev/null || true)"
@@ -305,7 +305,7 @@ open_cache="$TEST_ROOT/open-cache"
 output="$(run_interactive ol "$open_home" "$open_cache" latest --version)"
 interactive_status=$?
 assert_status 0 "$interactive_status" 'o waits for l before continuing'
-assert_contains "$output" 'claude-profile 0.4.1 → 0.5.0 available' \
+assert_contains "$output" 'claude-profile 0.5.0 → 0.6.0 available' \
   'interactive invocation announces a newer version'
 assert_occurrences "$output" '[o] Open release page' 2 \
   'o redisplays the update prompt'
@@ -336,7 +336,7 @@ fi
 : > "$curl_log"
 output="$(run_interactive '' "$interactive_home" "$interactive_cache" latest --version || true)"
 assert_file_eq '' "$curl_log" 'a snoozed invocation performs no release request'
-assert_contains "$output" 'claude-profile 0.4.1' 'a snoozed invocation continues'
+assert_contains "$output" 'claude-profile 0.5.0' 'a snoozed invocation continues'
 
 update_home="$TEST_ROOT/update-home"
 update_cache="$TEST_ROOT/update-cache"
@@ -365,13 +365,13 @@ skip_cache="$TEST_ROOT/skip-cache"
 output="$(run_interactive '' "$skip_home" "$skip_cache" latest \
   --version --skip-version-check || true)"
 assert_file_eq '' "$curl_log" '--skip-version-check prevents release requests'
-assert_contains "$output" 'claude-profile 0.4.1' \
+assert_contains "$output" 'claude-profile 0.5.0' \
   '--skip-version-check continues the original command'
 
 offline_home="$TEST_ROOT/offline-home"
 offline_cache="$TEST_ROOT/offline-cache"
 output="$(run_interactive '' "$offline_home" "$offline_cache" offline --version || true)"
-assert_contains "$output" 'claude-profile 0.4.1' 'offline update checks do not block commands'
+assert_contains "$output" 'claude-profile 0.5.0' 'offline update checks do not block commands'
 assert_not_contains "$output" 'simulated network failure' \
   'offline update checks fail silently'
 
@@ -473,6 +473,14 @@ repair_home="$TEST_ROOT/repair-home"
 mkdir -p "$repair_home/.claude/skills" \
   "$repair_home/.claude/agents" \
   "$repair_home/.claude/commands" \
+  "$repair_home/.claude/rules" \
+  "$repair_home/.claude/output-styles" \
+  "$repair_home/.claude/workflows" \
+  "$repair_home/.claude/themes" \
+  "$repair_home/.claude/hooks" \
+  "$repair_home/.claude/plugins/cache" \
+  "$repair_home/.claude/plugins/data" \
+  "$repair_home/.claude/plugins/marketplaces" \
   "$repair_home/.claude-custom-profiles/work/skills"
 printf '%s\n' '{"theme":"dark"}' > "$repair_home/.claude/settings.json"
 printf '%s\n' '{"theme":"light"}' > \
@@ -483,6 +491,13 @@ printf '%s\n' '[{"key":"ctrl+j"}]' > \
 printf '%s\n' 'default skill' > "$repair_home/.claude/skills/default.md"
 printf '%s\n' 'profile skill' > \
   "$repair_home/.claude-custom-profiles/work/skills/profile.md"
+printf '%s\n' '# Shared instructions' > "$repair_home/.claude/CLAUDE.md"
+printf '%s\n' '{}' > "$repair_home/.claude/plugins/installed_plugins.json"
+printf '%s\n' '{}' > "$repair_home/.claude/plugins/known_marketplaces.json"
+printf '%s\n' '{}' > "$repair_home/.claude/plugins/blocklist.json"
+mkdir -p "$repair_home/.claude/projects" \
+  "$repair_home/.claude/plugins/synced" \
+  "$repair_home/.claude/agent-memory"
 
 output="$(HOME="$repair_home" "$CLI" --repair --all --force 2>&1 || true)"
 assert_symlink_to "$repair_home/.claude/settings.json" \
@@ -513,6 +528,18 @@ assert_symlink_to "$repair_home/.claude/agents" \
 assert_symlink_to "$repair_home/.claude/commands" \
   "$repair_home/.claude-custom-profiles/work/commands" \
   '--repair --all syncs commands with the default profile'
+for shared_item in CLAUDE.md rules output-styles workflows themes hooks \
+  plugins/cache plugins/data plugins/marketplaces \
+  plugins/installed_plugins.json plugins/known_marketplaces.json \
+  plugins/blocklist.json; do
+  assert_symlink_to "$repair_home/.claude/$shared_item" \
+    "$repair_home/.claude-custom-profiles/work/$shared_item" \
+    "--repair --all syncs $shared_item with the default profile"
+done
+for isolated_item in projects plugins/synced agent-memory; do
+  assert_file_missing "$repair_home/.claude-custom-profiles/work/$isolated_item" \
+    "--repair --all leaves $isolated_item profile-specific"
+done
 assert_not_contains "$output" '@@' '--force does not show a diff'
 
 force_order_home="$TEST_ROOT/force-order-home"
@@ -594,6 +621,63 @@ assert_contains "$output" 'identical' \
 assert_symlink_to "$identical_home/.claude/settings.json" \
   "$identical_home/.claude-custom-profiles/work/settings.json" \
   'normal repair links identical copies automatically'
+
+merge_home="$TEST_ROOT/merge-home"
+mkdir -p "$merge_home/.claude" \
+  "$merge_home/.claude-custom-profiles/work"
+printf '%s\n' \
+  '{"env":{"DEFAULT_ONLY":"1"},"permissions":{"allow":["Read"]},"theme":"dark"}' \
+  > "$merge_home/.claude/settings.json"
+printf '%s\n' \
+  '{"env":{"PROFILE_ONLY":"1"},"permissions":{"allow":["Edit"]},"theme":"light"}' \
+  > "$merge_home/.claude-custom-profiles/work/settings.json"
+output="$(run_repair_interactive m "$merge_home" --repair work)"
+assert_symlink_to "$merge_home/.claude/settings.json" \
+  "$merge_home/.claude-custom-profiles/work/settings.json" \
+  'm links merged settings to the profile'
+assert_eq '1|1|light|Edit,Read' \
+  "$(jq -r '[.env.DEFAULT_ONLY, .env.PROFILE_ONLY, .theme, (.permissions.allow | sort | join(","))] | join("|")' "$merge_home/.claude/settings.json" 2>/dev/null)" \
+  'm recursively combines JSON with profile scalar precedence'
+assert_file_eq \
+  '{"env":{"DEFAULT_ONLY":"1"},"permissions":{"allow":["Read"]},"theme":"dark"}' \
+  "$merge_home/.claude/settings.json.claude-profile-backup" \
+  'm backs up default settings'
+assert_file_eq \
+  '{"env":{"PROFILE_ONLY":"1"},"permissions":{"allow":["Edit"]},"theme":"light"}' \
+  "$merge_home/.claude-custom-profiles/work/settings.json.claude-profile-backup" \
+  'm backs up profile settings'
+assert_contains "$output" 'merged' 'm reports merged conflicts'
+
+directory_merge_home="$TEST_ROOT/directory-merge-home"
+mkdir -p "$directory_merge_home/.claude/skills" \
+  "$directory_merge_home/.claude-custom-profiles/work/skills"
+printf '%s\n' 'default only' > \
+  "$directory_merge_home/.claude/skills/default.md"
+printf '%s\n' 'default version' > \
+  "$directory_merge_home/.claude/skills/shared.md"
+printf '%s\n' 'profile only' > \
+  "$directory_merge_home/.claude-custom-profiles/work/skills/profile.md"
+printf '%s\n' 'profile version' > \
+  "$directory_merge_home/.claude-custom-profiles/work/skills/shared.md"
+
+output="$(run_repair_interactive m "$directory_merge_home" --repair work)"
+assert_symlink_to "$directory_merge_home/.claude/skills" \
+  "$directory_merge_home/.claude-custom-profiles/work/skills" \
+  'm links merged directories to the profile'
+assert_file_eq 'default only' \
+  "$directory_merge_home/.claude/skills/default.md" \
+  'm keeps default-only directory entries'
+assert_file_eq 'profile only' \
+  "$directory_merge_home/.claude/skills/profile.md" \
+  'm adds profile-only directory entries'
+assert_file_eq 'profile version' \
+  "$directory_merge_home/.claude/skills/shared.md" \
+  'm uses profile files for directory path conflicts'
+
+output="$(HOME="$merge_home" "$CLI" --skip-version-check \
+  --repair work --merge 2>&1 || true)"
+assert_contains "$output" "Unknown repair option '--merge'." \
+  '--merge is not exposed as a command-line option'
 
 output="$(HOME="$alias_home" "$CLI" -V 2>&1 || true)"
 assert_eq "$expected_version" "$output" '-V shows the version'

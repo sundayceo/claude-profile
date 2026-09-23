@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="0.4.1"
+VERSION="0.5.0"
 set -euo pipefail
 
 DEFAULT_CONFIG="$HOME/.claude"
@@ -11,9 +11,21 @@ INSTALL_URL="https://raw.githubusercontent.com/sundayceo/claude-profile/main/ins
 SHARED_ITEMS=(
   settings.json
   keybindings.json
+  CLAUDE.md
   skills
   agents
   commands
+  rules
+  output-styles
+  workflows
+  themes
+  hooks
+  plugins/installed_plugins.json
+  plugins/known_marketplaces.json
+  plugins/blocklist.json
+  plugins/marketplaces
+  plugins/cache
+  plugins/data
 )
 
 CLAUDE_BIN="$(type -P claude || true)"
@@ -316,7 +328,10 @@ create_shared_links() {
     dest="$target/$item"
 
     [[ -e "$source" || -L "$source" ]] || continue
-    [[ -e "$dest" || -L "$dest" ]] || ln -s "$source" "$dest"
+    if [[ ! -e "$dest" && ! -L "$dest" ]]; then
+      mkdir -p "$(dirname "$dest")"
+      ln -s "$source" "$dest"
+    fi
   done
 }
 
@@ -514,14 +529,100 @@ use_profile_item() {
   printf "  repaired  %s -> %s\n" "$item" "$source"
 }
 
+merge_json_items() {
+  local source="$1"
+  local dest="$2"
+  local merged="$3"
+
+  jq -s '
+    def deep_merge($left; $right):
+      if ($left | type) == "object" and ($right | type) == "object" then
+        reduce (($left + $right) | keys_unsorted[]) as $key
+          ({};
+            .[$key] =
+              if ($left | has($key)) and ($right | has($key)) then
+                deep_merge($left[$key]; $right[$key])
+              elif ($right | has($key)) then
+                $right[$key]
+              else
+                $left[$key]
+              end)
+      elif ($left | type) == "array" and ($right | type) == "array" then
+        reduce ($left + $right)[] as $item
+          ([]; if index($item) == null then . + [$item] else . end)
+      else
+        $right
+      end;
+    deep_merge(.[0]; .[1])
+  ' "$source" "$dest" > "$merged"
+}
+
+merge_shared_item() {
+  local item="$1"
+  local source="$2"
+  local dest="$3"
+  local source_backup dest_backup merged
+  source_backup="$(next_backup_path "$source")"
+  dest_backup="$(next_backup_path "$dest")"
+
+  if { [[ -d "$source" ]] && [[ ! -d "$dest" ]]; } || \
+     { [[ ! -d "$source" ]] && [[ -d "$dest" ]]; }; then
+    echo "Could not merge $item because one copy is a directory and the other is a file." >&2
+    return 1
+  fi
+
+  if [[ -d "$source" && -d "$dest" ]]; then
+    merged="$(mktemp -d)"
+    cp -R "$source/." "$merged/"
+    cp -R "$dest/." "$merged/"
+  else
+    merged="$(mktemp)"
+    if [[ "$source" == *.json && "$dest" == *.json ]]; then
+      if ! merge_json_items "$source" "$dest" "$merged"; then
+        rm -rf "$merged"
+        echo "Could not merge $item as JSON; left both copies unchanged." >&2
+        return 1
+      fi
+    else
+      cat "$source" > "$merged"
+      printf '\n' >> "$merged"
+      cat "$dest" >> "$merged"
+    fi
+  fi
+
+  mv "$source" "$source_backup"
+  if ! mv "$dest" "$dest_backup"; then
+    mv "$source_backup" "$source"
+    rm -rf "$merged"
+    return 1
+  fi
+  if ! mv "$merged" "$source"; then
+    mv "$dest_backup" "$dest"
+    mv "$source_backup" "$source"
+    rm -rf "$merged"
+    return 1
+  fi
+  if ! ln -s "$source" "$dest"; then
+    mv "$source" "$merged"
+    mv "$dest_backup" "$dest"
+    mv "$source_backup" "$source"
+    rm -rf "$merged"
+    return 1
+  fi
+
+  printf "  backed up default %s -> %s\n" "$item" "$source_backup"
+  printf "  backed up profile %s -> %s\n" "$item" "$dest_backup"
+  printf "  merged    %s -> %s\n" "$item" "$source"
+}
+
 resolve_shared_item_conflict() {
   local item="$1"
   local source="$2"
   local dest="$3"
-  local force="$4"
+  local mode="$4"
   local choice
 
-  if [[ "$force" -eq 1 ]]; then
+  if [[ "$mode" == 'force' ]]; then
     use_default_item "$item" "$source" "$dest"
     return
   fi
@@ -533,11 +634,15 @@ resolve_shared_item_conflict() {
   fi
 
   printf "\n  Differences for %s:\n" "$item"
-  diff -ru "$source" "$dest" || true
+  if [[ -d "$source" && -d "$dest" ]]; then
+    diff -qr "$source" "$dest" || true
+  else
+    diff -u "$source" "$dest" || true
+  fi
   echo
 
   while true; do
-    printf 'Choose [d]efault, [p]rofile, or [s]kip: ' >&2
+    printf 'Choose [d]efault, [p]rofile, [m]erge, or [s]kip: ' >&2
     if ! IFS= read -r choice </dev/tty 2>/dev/null; then
       echo >&2
       printf "  skip    %s (no terminal; use --force to keep default)\n" "$item"
@@ -553,12 +658,16 @@ resolve_shared_item_conflict() {
         use_profile_item "$item" "$source" "$dest"
         return
         ;;
+      m|M)
+        merge_shared_item "$item" "$source" "$dest"
+        return
+        ;;
       s|S)
         printf "  skip    %s (left unchanged)\n" "$item"
         return
         ;;
       *)
-        echo 'Choose d, p, or s.' >&2
+        echo 'Choose d, p, m, or s.' >&2
         ;;
     esac
   done
@@ -566,7 +675,7 @@ resolve_shared_item_conflict() {
 
 repair_profile() {
   local name="$1"
-  local force="${2:-0}"
+  local mode="${2:-prompt}"
 
   if [[ "$name" == "default" ]]; then
     echo "Default profile needs no repair:"
@@ -611,23 +720,24 @@ repair_profile() {
     fi
 
     if [[ -e "$dest" ]]; then
-      resolve_shared_item_conflict "$item" "$source" "$dest" "$force"
+      resolve_shared_item_conflict "$item" "$source" "$dest" "$mode"
       continue
     fi
 
+    mkdir -p "$(dirname "$dest")"
     ln -s "$source" "$dest"
     printf "  created %s -> %s\n" "$item" "$source"
   done
 }
 
 repair_all_profiles() {
-  local force="${1:-0}"
+  local mode="${1:-prompt}"
   local dir found=0
 
   while IFS= read -r dir; do
     [[ -n "$dir" ]] || continue
     found=1
-    repair_profile "$(basename "$dir")" "$force"
+    repair_profile "$(basename "$dir")" "$mode"
     echo
   done < <(list_custom_profile_dirs)
 
@@ -636,13 +746,13 @@ repair_all_profiles() {
 
 run_repair() {
   local target=''
-  local force=0
+  local mode='prompt'
   local arg
 
   for arg in "$@"; do
     case "$arg" in
       --force|-f)
-        force=1
+        mode='force'
         ;;
       --all|-a)
         [[ -z "$target" ]] || \
@@ -664,9 +774,9 @@ run_repair() {
     die "Usage: claude-profile --repair <name> [--force] | --repair --all [--force]"
 
   if [[ "$target" == '--all' ]]; then
-    repair_all_profiles "$force"
+    repair_all_profiles "$mode"
   else
-    repair_profile "$target" "$force"
+    repair_profile "$target" "$mode"
   fi
 }
 
