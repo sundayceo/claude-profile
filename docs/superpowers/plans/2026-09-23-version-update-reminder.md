@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add version reporting, a skippable interactive GitHub release check, update actions, and a 24-hour reminder snooze while bumping the CLI to `0.2.0`.
+**Goal:** Add version reporting, persistent active-profile selection, one-off profile sessions, and a skippable interactive GitHub release reminder while bumping the CLI to `0.2.0`.
 
-**Architecture:** Keep the single-file Bash CLI and its existing `VERSION` source of truth. Add small functions for semantic-version comparison, release discovery, snooze persistence, prompting, and update installation; call them from a new `main` function before the existing command dispatch. Exercise the public CLI through a dependency-free shell test harness, substituting external programs through `PATH` and using a pseudo-terminal only for interactive cases.
+**Architecture:** Keep the single-file Bash CLI and its existing `VERSION` source of truth. Add focused functions for argument parsing, active-profile state, semantic-version comparison, release discovery, snooze persistence, prompting, and update installation; call them from a new `main` function. Exercise the public CLI through a dependency-free shell test harness, substituting external programs through `PATH` and using a pseudo-terminal only for interactive cases.
 
 **Tech Stack:** Bash 3.2-compatible shell, `curl`, macOS `open`, POSIX utilities, shell integration tests.
 
@@ -52,7 +52,31 @@ show_version() {
 Run: `bash tests/cli_test.sh`
 Expected: PASS for long flag, short flag, and help output.
 
-### Task 2: Release discovery and bypass
+### Task 2: Persistent and one-off profile selection
+
+**Files:**
+- Modify: `tests/cli_test.sh`
+- Modify: `claude-profile`
+
+- [ ] **Step 1: Write failing profile-selection tests**
+
+Use temporary `HOME` and fake `claude` executables to assert that bare `claude-profile` launches `default` when no state exists, `--use work` writes `work` to `.claude-custom-profiles/.active-profile` without launching, a later bare invocation launches `work`, and `--profile work` plus `-P work` launch one-off sessions without changing the state file. Assert arguments after `--` reach the fake Claude executable.
+
+- [ ] **Step 2: Verify the profile tests fail**
+
+Run: `bash tests/cli_test.sh`
+Expected: FAIL because bare execution shows help, `--use` launches immediately, and `--profile` is unknown.
+
+- [ ] **Step 3: Implement active-profile state and dispatch**
+
+Add `ACTIVE_PROFILE_FILE="$PROFILES_ROOT/.active-profile"`, plus `active_profile`, `set_active_profile`, and `select_active_profile`. Change `--use` to select, validate, persist atomically, print the new active profile, and exit. Add `--profile|-P` for one-off launching. Change empty dispatch to launch `active_profile`; invalid saved state falls back to `default`. When `--delete` removes the active profile, write `default`.
+
+- [ ] **Step 4: Verify profile-selection tests pass**
+
+Run: `bash tests/cli_test.sh`
+Expected: PASS for default, saved, one-off, argument forwarding, and deletion fallback behavior.
+
+### Task 3: Release discovery and bypass
 
 **Files:**
 - Modify: `tests/cli_test.sh`
@@ -64,8 +88,11 @@ Add a fake `curl` executable through a temporary `PATH`. It records calls and re
 
 ```bash
 claude-profile --skip-version-check --version
+claude-profile --version --skip-version-check
 printf '' | claude-profile --version
 ```
+
+Also assert that `--skip-version-check` after a `--` boundary is forwarded to Claude rather than consumed.
 
 - [ ] **Step 2: Verify the new tests fail**
 
@@ -82,14 +109,14 @@ latest_version
 should_check_for_update
 ```
 
-`latest_version` uses `curl -fsSIL --connect-timeout 1 --max-time 2 -o /dev/null -w '%{url_effective}' "$RELEASES_URL/latest"`, strips a leading `v`, and accepts only three numeric components. `is_newer_version` compares those components numerically without GNU-only `sort -V`. `should_check_for_update` requires terminal stdin and stderr. At the start of `main`, remove a first-position `--skip-version-check` before dispatch and suppress the check for that invocation.
+`latest_version` uses `curl -fsSIL --connect-timeout 1 --max-time 2 -o /dev/null -w '%{url_effective}' "$RELEASES_URL/latest"`, strips a leading `v`, and accepts only three numeric components. `is_newer_version` compares those components numerically without GNU-only `sort -V`. `should_check_for_update` requires terminal stdin and stderr. At the start of `main`, scan arguments up to `--`, remove every `--skip-version-check` modifier while preserving order, and suppress the check for that invocation.
 
 - [ ] **Step 4: Verify discovery tests pass**
 
 Run: `bash tests/cli_test.sh`
 Expected: PASS with no real network access.
 
-### Task 3: Interactive choices and snooze
+### Task 4: Interactive choices and snooze
 
 **Files:**
 - Modify: `tests/cli_test.sh`
@@ -122,7 +149,7 @@ Add `snooze_file`, `is_snoozed`, `snooze_updates`, `install_update`, and `check_
 Run: `bash tests/cli_test.sh`
 Expected: PASS for version output, bypass, offline behavior, all choices, snoozing, and command continuation.
 
-### Task 4: Documentation and final verification
+### Task 5: Documentation and final verification
 
 **Files:**
 - Modify: `README.md`
@@ -134,10 +161,12 @@ Add a concise README section showing:
 
 ```bash
 claude-profile --version
+claude-profile --use work
+claude-profile --profile personal
 claude-profile --skip-version-check --use work
 ```
 
-Explain the `o`, `u`, and `l` actions and the 24-hour snooze.
+Explain persistent active profiles, one-off sessions, the `o`, `u`, and `l` actions, and the 24-hour snooze.
 
 - [ ] **Step 2: Run syntax and behavior verification**
 
