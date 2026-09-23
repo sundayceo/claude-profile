@@ -240,14 +240,20 @@ profile_exists() {
 }
 
 active_profile() {
-  local name
+  local name='' line line_count=0
 
   if [[ -f "$ACTIVE_PROFILE_FILE" ]]; then
-    name="$(cat "$ACTIVE_PROFILE_FILE")"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line_count=$((line_count + 1))
+      if [[ "$line_count" -gt 1 ]]; then
+        name=''
+        break
+      fi
+      name="$line"
+    done < "$ACTIVE_PROFILE_FILE"
   fi
 
-  if [[ -n "${name:-}" ]] && \
-     [[ "$name" != *$'\n'* ]] && \
+  if [[ -n "$name" ]] && \
      [[ "$name" == "default" || "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] && \
      profile_exists "$name"; then
     printf '%s\n' "$name"

@@ -241,6 +241,13 @@ snooze_file="$interactive_cache/claude-profile/version-check-snooze-until"
 if [[ ! -f "$snooze_file" ]] || ! [[ "$(cat "$snooze_file" 2>/dev/null)" =~ ^[0-9]+$ ]]; then
   printf 'FAIL: l stores a numeric snooze deadline\n' >&2
   failures=$((failures + 1))
+else
+  snooze_deadline="$(cat "$snooze_file")"
+  expected_deadline=$(( $(date +%s) + 86400 ))
+  if (( snooze_deadline < expected_deadline - 10 || snooze_deadline > expected_deadline + 10 )); then
+    printf 'FAIL: l stores a deadline approximately 24 hours ahead\n' >&2
+    failures=$((failures + 1))
+  fi
 fi
 
 : > "$curl_log"
@@ -285,6 +292,13 @@ assert_contains "$output" 'claude-profile 0.2.0' 'offline update checks do not b
 assert_not_contains "$output" 'simulated network failure' \
   'offline update checks fail silently'
 
+current_home="$TEST_ROOT/current-home"
+current_cache="$TEST_ROOT/current-cache"
+output="$(run_interactive '' "$current_home" "$current_cache" current --version)"
+current_status=$?
+assert_status 0 "$current_status" 'the current release continues successfully'
+assert_not_contains "$output" 'available' 'the current release shows no update prompt'
+
 : > "$curl_log"
 HOME="$TEST_ROOT/noninteractive-home" PATH="$fake_bin:$PATH" \
   CURL_TEST_LOG="$curl_log" CURL_TEST_MODE=latest \
@@ -312,6 +326,13 @@ HOME="$malformed_home" PATH="$fake_bin:$PATH" CLAUDE_TEST_LOG="$malformed_log" \
   "$CLI" >/dev/null 2>&1 || true
 assert_file_eq $'config=<unset>\nargs=' "$malformed_log" \
   'a malformed multiline active-profile file falls back to default'
+
+printf 'work\n\n' > "$malformed_home/.claude-custom-profiles/.active-profile"
+: > "$malformed_log"
+HOME="$malformed_home" PATH="$fake_bin:$PATH" CLAUDE_TEST_LOG="$malformed_log" \
+  "$CLI" >/dev/null 2>&1 || true
+assert_file_eq $'config=<unset>\nargs=' "$malformed_log" \
+  'an active-profile file with a trailing blank line falls back to default'
 
 boundary_home="$TEST_ROOT/boundary-home"
 boundary_log="$TEST_ROOT/boundary-claude.log"
