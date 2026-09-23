@@ -34,6 +34,12 @@ Then launch Claude Code with the active profile:
 claude-profile
 ```
 
+Pass Claude arguments to the active profile after `--`:
+
+```bash
+claude-profile -- --dangerously-skip-permissions
+```
+
 You can also select the active profile interactively:
 
 ```bash

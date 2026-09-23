@@ -157,7 +157,7 @@ run_repair_interactive() {
       "$choice" "$CLI" --skip-version-check "$@" 2>&1
 }
 
-expected_version='claude-profile 0.4.0
+expected_version='claude-profile 0.4.1
 Releases: https://github.com/sundayceo/claude-profile/releases'
 
 home="$TEST_ROOT/version-home"
@@ -227,6 +227,13 @@ HOME="$home" PATH="$fake_bin:$PATH" CLAUDE_TEST_LOG="$log" \
   "$CLI" >/dev/null 2>&1 || true
 assert_file_eq "config=$home/.claude-custom-profiles/work
 args=" "$log" 'bare invocation launches the saved active profile'
+
+: > "$log"
+HOME="$home" PATH="$fake_bin:$PATH" CLAUDE_TEST_LOG="$log" \
+  "$CLI" -- --dangerously-skip-permission >/dev/null 2>&1 || true
+assert_file_eq "config=$home/.claude-custom-profiles/work
+args=<--dangerously-skip-permission>" "$log" \
+  'a bare -- boundary forwards Claude arguments to the active profile'
 
 printf '%s\n' default > "$home/.claude-custom-profiles/.active-profile"
 : > "$log"
@@ -298,7 +305,7 @@ open_cache="$TEST_ROOT/open-cache"
 output="$(run_interactive ol "$open_home" "$open_cache" latest --version)"
 interactive_status=$?
 assert_status 0 "$interactive_status" 'o waits for l before continuing'
-assert_contains "$output" 'claude-profile 0.4.0 → 0.5.0 available' \
+assert_contains "$output" 'claude-profile 0.4.1 → 0.5.0 available' \
   'interactive invocation announces a newer version'
 assert_occurrences "$output" '[o] Open release page' 2 \
   'o redisplays the update prompt'
@@ -329,7 +336,7 @@ fi
 : > "$curl_log"
 output="$(run_interactive '' "$interactive_home" "$interactive_cache" latest --version || true)"
 assert_file_eq '' "$curl_log" 'a snoozed invocation performs no release request'
-assert_contains "$output" 'claude-profile 0.4.0' 'a snoozed invocation continues'
+assert_contains "$output" 'claude-profile 0.4.1' 'a snoozed invocation continues'
 
 update_home="$TEST_ROOT/update-home"
 update_cache="$TEST_ROOT/update-cache"
@@ -358,13 +365,13 @@ skip_cache="$TEST_ROOT/skip-cache"
 output="$(run_interactive '' "$skip_home" "$skip_cache" latest \
   --version --skip-version-check || true)"
 assert_file_eq '' "$curl_log" '--skip-version-check prevents release requests'
-assert_contains "$output" 'claude-profile 0.4.0' \
+assert_contains "$output" 'claude-profile 0.4.1' \
   '--skip-version-check continues the original command'
 
 offline_home="$TEST_ROOT/offline-home"
 offline_cache="$TEST_ROOT/offline-cache"
 output="$(run_interactive '' "$offline_home" "$offline_cache" offline --version || true)"
-assert_contains "$output" 'claude-profile 0.4.0' 'offline update checks do not block commands'
+assert_contains "$output" 'claude-profile 0.4.1' 'offline update checks do not block commands'
 assert_not_contains "$output" 'simulated network failure' \
   'offline update checks fail silently'
 

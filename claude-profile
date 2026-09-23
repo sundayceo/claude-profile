@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="0.4.0"
+VERSION="0.4.1"
 set -euo pipefail
 
 DEFAULT_CONFIG="$HOME/.claude"
@@ -29,6 +29,7 @@ Claude Profile Manager
 
 Usage:
   claude-profile [global options] [command] [arguments]
+  claude-profile [global options] -- [claude args]
   claude-profile --profile <name> [-- <claude args>]
 
 No arguments:
@@ -719,6 +720,10 @@ main() {
     ;;
   --version|-V)
     show_version
+    ;;
+  --)
+    shift
+    use_profile "$(active_profile)" "$@"
     ;;
   "")
     use_profile "$(active_profile)"
